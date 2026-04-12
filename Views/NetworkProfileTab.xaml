@@ -1,0 +1,46 @@
+<UserControl x:Class="WinNetManager.Views.NetworkProfileTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel Margin="8">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+            <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
+            <Button Content="重命名" Padding="12,4" Margin="6,0,0,0" Click="BtnRename_Click"/>
+            <Button Content="设为公用" Padding="12,4" Margin="6,0,0,0" Click="BtnSetPublic_Click"/>
+            <Button Content="设为专用" Padding="12,4" Margin="6,0,0,0" Click="BtnSetPrivate_Click"/>
+            <Button Content="删除选中" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnDelete_Click"/>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
+                   Text="管理「网络」「网络 2」「网络 3」等网络位置配置文件。切换公用/专用、重命名或删除历史网络。"/>
+        <DataGrid x:Name="ProfileGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                  SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
+                  ColumnWidth="Auto" Sorting="Grid_Sorting">
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="复制选中值" Click="MenuCopy_Click" InputGestureText="Ctrl+C"/>
+                    <Separator/>
+                    <MenuItem Header="在 RegEdit 中打开" Click="MenuOpenRegEdit_Click"/>
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="选择" Width="50" CanUserResize="False">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Binding="{Binding ProfileName}" Header="名称" IsReadOnly="True" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding CategoryDisplay}" Header="类别" IsReadOnly="True" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" IsReadOnly="True" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding Description}" Header="描述" IsReadOnly="True" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding DateCreated, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"
+                                    Header="创建时间" IsReadOnly="True" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding DateLastConnected, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"
+                                    Header="最后连接" IsReadOnly="True" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" IsReadOnly="True" Width="Auto"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>
