@@ -4,7 +4,6 @@ public class DeviceDescription
 {
     public string Name { get; set; } = "";
     public string[] InstanceNumbers { get; set; } = [];
-    public bool IsSelected { get; set; }
 
     public int Count => InstanceNumbers.Length;
     public int MaxInstance => InstanceNumbers.Length > 0

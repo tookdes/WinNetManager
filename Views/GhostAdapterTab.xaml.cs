@@ -29,12 +29,18 @@ public partial class GhostAdapterTab : UserControl
         catch (Exception ex) { MessageBox.Show($"枚举网络适配器失败：\n{ex.Message}"); }
     }
 
+    private List<GhostAdapter> GetSelected() =>
+        AdapterGrid.SelectedItems.Cast<GhostAdapter>().ToList();
+
     private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => AdapterGrid.SelectAll();
+    private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
+        NetworkProfileTab.InvertSelection(AdapterGrid, _adapters);
 
     private void BtnRemove_Click(object sender, RoutedEventArgs e)
     {
-        var sel = _adapters.Where(a => a.IsSelected && !a.IsPresent).ToList();
-        if (sel.Count == 0) { MessageBox.Show("请手动勾选要卸载的幽灵设备。\n活跃设备不能通过此方式卸载。\n\n注意：WAN Miniport 等系统虚拟设备不应卸载。"); return; }
+        var sel = GetSelected().Where(a => !a.IsPresent).ToList();
+        if (sel.Count == 0) { MessageBox.Show("请选中要卸载的幽灵设备。\n活跃设备不能通过此方式卸载。\n\n注意：WAN Miniport 等系统虚拟设备不应卸载。"); return; }
         var names = string.Join("\n", sel.Select(a => $"  - {a.FriendlyName} ({a.DeviceInstanceId})"));
         if (MessageBox.Show($"确定要卸载以下 {sel.Count} 个幽灵设备？\n\n{names}\n\n此操作会从设备管理器中移除这些设备。",
             "确认卸载", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;

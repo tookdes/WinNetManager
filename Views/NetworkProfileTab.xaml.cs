@@ -37,7 +37,15 @@ public partial class NetworkProfileTab : UserControl
         }
     }
 
+    private List<NetworkProfile> GetSelected() =>
+        ProfileGrid.SelectedItems.Cast<NetworkProfile>().ToList();
+
     private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+
+    private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => ProfileGrid.SelectAll();
+
+    private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
+        InvertSelection(ProfileGrid, _profiles);
 
     private void BtnRename_Click(object sender, RoutedEventArgs e)
     {
@@ -61,7 +69,7 @@ public partial class NetworkProfileTab : UserControl
     private void SetCategory(NetworkCategory cat)
     {
         var sel = GetSelected();
-        if (sel.Count == 0) { MessageBox.Show("请选择至少一个配置文件。"); return; }
+        if (sel.Count == 0) { MessageBox.Show("请先选中至少一个配置文件。"); return; }
         string cn = cat == NetworkCategory.Public ? "公用" : "专用";
         int ok = 0;
         foreach (var p in sel)
@@ -81,7 +89,7 @@ public partial class NetworkProfileTab : UserControl
     private void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected().Where(p => !p.IsConnected).ToList();
-        if (sel.Count == 0) { MessageBox.Show("请选择至少一个未连接的历史配置文件进行删除。\n当前连接的网络不能删除。"); return; }
+        if (sel.Count == 0) { MessageBox.Show("请选中至少一个未连接的历史配置文件进行删除。\n当前连接的网络不能删除。"); return; }
         var names = string.Join("\n", sel.Select(p => $"  - {p.ProfileName}"));
         if (MessageBox.Show($"确定要删除以下 {sel.Count} 个历史网络配置文件？\n\n{names}\n\n此操作不可撤销（但可通过备份恢复）。",
             "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
@@ -91,10 +99,7 @@ public partial class NetworkProfileTab : UserControl
         RefreshData();
     }
 
-    private void MenuCopy_Click(object sender, RoutedEventArgs e)
-    {
-        CopySelectedCellValue(ProfileGrid);
-    }
+    private void MenuCopy_Click(object sender, RoutedEventArgs e) => CopySelectedCellValue(ProfileGrid);
 
     private void MenuOpenRegEdit_Click(object sender, RoutedEventArgs e)
     {
@@ -114,10 +119,8 @@ public partial class NetworkProfileTab : UserControl
         string prop = (e.Column as DataGridBoundColumn)?.Binding is System.Windows.Data.Binding b ? b.Path.Path : "";
         view.SortDescriptions.Add(new System.ComponentModel.SortDescription(prop, dir));
         if (view is System.Windows.Data.ListCollectionView lcv)
-            lcv.CustomSort = new Services.NaturalSortByProperty(prop, dir);
+            lcv.CustomSort = new NaturalSortByProperty(prop, dir);
     }
-
-    private List<NetworkProfile> GetSelected() => _profiles.Where(p => p.IsSelected).ToList();
 
     private void SetStatus(string msg) { if (Window.GetWindow(this) is MainWindow mw) mw.SetStatus(msg); }
 
@@ -133,7 +136,18 @@ public partial class NetworkProfileTab : UserControl
         }
     }
 
-    private static string? PromptInput(string title, string prompt, string defaultValue)
+    internal static void InvertSelection<T>(DataGrid grid, IList<T> allItems)
+    {
+        var currentlySelected = new HashSet<T>(grid.SelectedItems.Cast<T>());
+        grid.SelectedItems.Clear();
+        foreach (var item in allItems)
+        {
+            if (!currentlySelected.Contains(item))
+                grid.SelectedItems.Add(item);
+        }
+    }
+
+    internal static string? PromptInput(string title, string prompt, string defaultValue)
     {
         var dlg = new Window { Title = title, Width = 400, Height = 180, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
         var sp = new StackPanel { Margin = new Thickness(16) };

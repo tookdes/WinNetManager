@@ -4,30 +4,28 @@
     <DockPanel Margin="8">
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
             <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
+            <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
+            <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
+            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
             <Button Content="重置为单实例" Padding="12,4" Margin="6,0,0,0" Click="BtnReset_Click"/>
             <Button Content="删除选中" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnDelete_Click"/>
         </StackPanel>
         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray" TextWrapping="Wrap"
-                   Text="管理设备描述实例编号。值为使用中的实例编号列表（如 #1, #2）。重置后变为单实例 [1]，消除 #2 #3 后缀。值为 0 的条目已无对应设备。建议先清理幽灵网卡再重置。"/>
+                   Text="管理设备描述实例编号。值为使用中的实例编号列表（如 #1, #2）。重置后变为单实例 [1]，消除 #2 #3 后缀。建议先清理幽灵网卡再重置。Ctrl+点击多选。"/>
         <DataGrid x:Name="DescGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                  SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                  IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
                   HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8">
             <DataGrid.ContextMenu>
                 <ContextMenu>
+                    <MenuItem Header="重置为单实例" Click="BtnReset_Click"/>
+                    <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
+                    <Separator/>
                     <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
                 </ContextMenu>
             </DataGrid.ContextMenu>
             <DataGrid.Columns>
-                <DataGridTemplateColumn Header="选择" Width="50">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
-                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-                <DataGridTextColumn Binding="{Binding Name}" Header="设备描述" Width="*" IsReadOnly="True"/>
-                <DataGridTextColumn Binding="{Binding InstanceCountDisplay}" Header="实例编号" Width="180" IsReadOnly="True"/>
+                <DataGridTextColumn Binding="{Binding Name}" Header="设备描述" Width="*"/>
+                <DataGridTextColumn Binding="{Binding InstanceCountDisplay}" Header="实例编号" Width="180"/>
             </DataGrid.Columns>
         </DataGrid>
     </DockPanel>

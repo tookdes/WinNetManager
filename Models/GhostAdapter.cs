@@ -7,7 +7,6 @@ public class GhostAdapter
     public string Description { get; set; } = "";
     public string HardwareId { get; set; } = "";
     public bool IsPresent { get; set; }
-    public bool IsSelected { get; set; }
 
     public string StatusDisplay => IsPresent ? "活跃" : "幽灵";
 }

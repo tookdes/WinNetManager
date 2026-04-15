@@ -86,4 +86,13 @@ try {
 } catch { Write-Host "  PnP 枚举失败: $($_.Exception.Message)" -ForegroundColor Red }
 Write-Host ""
 
+# 6. 活跃适配器 GUID 匹配测试
+Write-Host "[6] NetworkInterface GUID 匹配" -ForegroundColor Yellow
+try {
+    [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | ForEach-Object {
+        Write-Host "  - $($_.Name) | ID: $($_.Id) | Status: $($_.OperationalStatus)"
+    }
+} catch { Write-Host "  枚举失败: $($_.Exception.Message)" -ForegroundColor Red }
+Write-Host ""
+
 Write-Host "=== 测试完成 ===" -ForegroundColor Cyan

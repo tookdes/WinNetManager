@@ -4,42 +4,42 @@
     <DockPanel Margin="8">
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
             <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
+            <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
+            <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
+            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
             <Button Content="重命名" Padding="12,4" Margin="6,0,0,0" Click="BtnRename_Click"/>
             <Button Content="设为公用" Padding="12,4" Margin="6,0,0,0" Click="BtnSetPublic_Click"/>
             <Button Content="设为专用" Padding="12,4" Margin="6,0,0,0" Click="BtnSetPrivate_Click"/>
             <Button Content="删除选中" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnDelete_Click"/>
         </StackPanel>
         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
-                   Text="管理「网络」「网络 2」「网络 3」等网络位置配置文件。切换公用/专用、重命名或删除历史网络。"/>
+                   Text="管理「网络」「网络 2」「网络 3」等网络位置配置文件。Ctrl+点击多选，Shift+点击范围选。"/>
         <DataGrid x:Name="ProfileGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                  SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                  IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
                   HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
                   ColumnWidth="Auto" Sorting="Grid_Sorting">
             <DataGrid.ContextMenu>
                 <ContextMenu>
-                    <MenuItem Header="复制选中值" Click="MenuCopy_Click" InputGestureText="Ctrl+C"/>
+                    <MenuItem Header="重命名" Click="BtnRename_Click" FontWeight="Bold"/>
+                    <MenuItem Header="设为公用" Click="BtnSetPublic_Click"/>
+                    <MenuItem Header="设为专用" Click="BtnSetPrivate_Click"/>
                     <Separator/>
+                    <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
+                    <Separator/>
+                    <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
                     <MenuItem Header="在 RegEdit 中打开" Click="MenuOpenRegEdit_Click"/>
                 </ContextMenu>
             </DataGrid.ContextMenu>
             <DataGrid.Columns>
-                <DataGridTemplateColumn Header="选择" Width="50" CanUserResize="False">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
-                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-                <DataGridTextColumn Binding="{Binding ProfileName}" Header="名称" IsReadOnly="True" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding CategoryDisplay}" Header="类别" IsReadOnly="True" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" IsReadOnly="True" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding Description}" Header="描述" IsReadOnly="True" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding ProfileName}" Header="名称" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding CategoryDisplay}" Header="类别" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding Description}" Header="描述" Width="Auto"/>
                 <DataGridTextColumn Binding="{Binding DateCreated, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"
-                                    Header="创建时间" IsReadOnly="True" Width="Auto"/>
+                                    Header="创建时间" Width="Auto"/>
                 <DataGridTextColumn Binding="{Binding DateLastConnected, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"
-                                    Header="最后连接" IsReadOnly="True" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" IsReadOnly="True" Width="Auto"/>
+                                    Header="最后连接" Width="Auto"/>
+                <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" Width="Auto"/>
             </DataGrid.Columns>
         </DataGrid>
     </DockPanel>

@@ -4,35 +4,32 @@
     <DockPanel Margin="8">
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
             <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
+            <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
+            <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
+            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
             <Button Content="重命名" Padding="12,4" Margin="6,0,0,0" Click="BtnRename_Click"/>
             <Button Content="删除选中" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnDelete_Click"/>
         </StackPanel>
         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
-                   Text="管理「以太网」「WLAN」「以太网 2」「本地连接 *3」等连接名称。"/>
+                   Text="管理「以太网」「WLAN」「以太网 2」「本地连接 *3」等连接名称。Ctrl+点击多选，Shift+点击范围选。"/>
         <DataGrid x:Name="ConnectionGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                  SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                  IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
                   HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
                   Sorting="Grid_Sorting">
             <DataGrid.ContextMenu>
                 <ContextMenu>
-                    <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
+                    <MenuItem Header="重命名" Click="BtnRename_Click" FontWeight="Bold"/>
+                    <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
                     <Separator/>
+                    <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
                     <MenuItem Header="在 RegEdit 中打开" Click="MenuOpenRegEdit_Click"/>
                 </ContextMenu>
             </DataGrid.ContextMenu>
             <DataGrid.Columns>
-                <DataGridTemplateColumn Header="选择" Width="50">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
-                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-                <DataGridTextColumn Binding="{Binding Name}" Header="连接名称" Width="180" IsReadOnly="True"/>
-                <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" Width="80" IsReadOnly="True"/>
-                <DataGridTextColumn Binding="{Binding PnpInstanceId}" Header="PnpInstanceID" Width="280" IsReadOnly="True"/>
-                <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" Width="280" IsReadOnly="True"/>
+                <DataGridTextColumn Binding="{Binding Name}" Header="连接名称" Width="180"/>
+                <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" Width="80"/>
+                <DataGridTextColumn Binding="{Binding PnpInstanceId}" Header="PnpInstanceID" Width="280"/>
+                <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" Width="280"/>
             </DataGrid.Columns>
         </DataGrid>
     </DockPanel>

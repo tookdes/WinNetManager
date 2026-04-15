@@ -28,14 +28,20 @@ public partial class ConnectionNameTab : UserControl
         catch (Exception ex) { MessageBox.Show($"读取连接信息失败：\n{ex.Message}"); }
     }
 
+    private List<ConnectionInfo> GetSelected() =>
+        ConnectionGrid.SelectedItems.Cast<ConnectionInfo>().ToList();
+
     private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => ConnectionGrid.SelectAll();
+    private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
+        NetworkProfileTab.InvertSelection(ConnectionGrid, _connections);
 
     private void BtnRename_Click(object sender, RoutedEventArgs e)
     {
-        var sel = _connections.Where(c => c.IsSelected).ToList();
+        var sel = GetSelected();
         if (sel.Count != 1) { MessageBox.Show("请选择一个连接进行重命名。"); return; }
         var c = sel[0];
-        string? n = PromptInput("重命名连接", $"当前名称: {c.Name}\n请输入新名称:", c.Name);
+        string? n = NetworkProfileTab.PromptInput("重命名连接", $"当前名称: {c.Name}\n请输入新名称:", c.Name);
         if (n == null || n == c.Name) return;
         try { ConnectionNameService.RenameConnection(c.Guid, n); SetStatus($"已将 \"{c.Name}\" 重命名为 \"{n}\""); RefreshData(); }
         catch (Exception ex) { MessageBox.Show($"重命名失败：\n{ex.Message}"); }
@@ -43,8 +49,8 @@ public partial class ConnectionNameTab : UserControl
 
     private void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
-        var sel = _connections.Where(c => c.IsSelected && !c.HasActiveAdapter).ToList();
-        if (sel.Count == 0) { MessageBox.Show("请选择至少一个无设备的连接条目进行删除。\n有活跃适配器的连接不能删除。"); return; }
+        var sel = GetSelected().Where(c => !c.HasActiveAdapter).ToList();
+        if (sel.Count == 0) { MessageBox.Show("请选中至少一个无设备的连接条目进行删除。\n有活跃适配器的连接不能删除。"); return; }
         var names = string.Join("\n", sel.Select(c => $"  - {c.Name}"));
         if (MessageBox.Show($"确定要删除以下 {sel.Count} 个连接条目？\n\n{names}\n\n此操作不可撤销（但可通过备份恢复）。",
             "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
@@ -69,33 +75,13 @@ public partial class ConnectionNameTab : UserControl
             ? System.ComponentModel.ListSortDirection.Descending
             : System.ComponentModel.ListSortDirection.Ascending;
         e.Column.SortDirection = dir;
-
         var view = System.Windows.Data.CollectionViewSource.GetDefaultView(ConnectionGrid.ItemsSource);
         view.SortDescriptions.Clear();
-        view.SortDescriptions.Add(new System.ComponentModel.SortDescription(
-            (e.Column as DataGridBoundColumn)?.Binding is System.Windows.Data.Binding b ? b.Path.Path : e.Column.Header?.ToString() ?? "",
-            dir));
+        string prop = (e.Column as DataGridBoundColumn)?.Binding is System.Windows.Data.Binding b ? b.Path.Path : "";
+        view.SortDescriptions.Add(new System.ComponentModel.SortDescription(prop, dir));
         if (view is System.Windows.Data.ListCollectionView lcv)
-            lcv.CustomSort = new Services.NaturalSortByProperty(
-                (e.Column as DataGridBoundColumn)?.Binding is System.Windows.Data.Binding b2 ? b2.Path.Path : null, dir);
+            lcv.CustomSort = new NaturalSortByProperty(prop, dir);
     }
 
     private void SetStatus(string msg) { if (Window.GetWindow(this) is MainWindow mw) mw.SetStatus(msg); }
-
-    private static string? PromptInput(string title, string prompt, string defaultValue)
-    {
-        var dlg = new Window { Title = title, Width = 400, Height = 180, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
-        var sp = new StackPanel { Margin = new Thickness(16) };
-        sp.Children.Add(new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
-        var tb = new TextBox { Text = defaultValue };
-        sp.Children.Add(tb);
-        var bp = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
-        var ok = new Button { Content = "确定", Width = 70, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
-        ok.Click += (_, _) => { dlg.DialogResult = true; };
-        bp.Children.Add(ok);
-        bp.Children.Add(new Button { Content = "取消", Width = 70, IsCancel = true });
-        sp.Children.Add(bp);
-        dlg.Content = sp;
-        return dlg.ShowDialog() == true ? tb.Text.Trim() : null;
-    }
 }

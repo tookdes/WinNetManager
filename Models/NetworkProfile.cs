@@ -18,7 +18,6 @@ public class NetworkProfile
     public int NameType { get; set; }
     public bool Managed { get; set; }
     public bool IsConnected { get; set; }
-    public bool IsSelected { get; set; }
 
     public string CategoryDisplay => Category switch
     {

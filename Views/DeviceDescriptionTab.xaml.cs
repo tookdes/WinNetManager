@@ -28,12 +28,18 @@ public partial class DeviceDescriptionTab : UserControl
         catch (Exception ex) { MessageBox.Show($"读取设备描述失败：\n{ex.Message}"); }
     }
 
+    private List<DeviceDescription> GetSelected() =>
+        DescGrid.SelectedItems.Cast<DeviceDescription>().ToList();
+
     private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => DescGrid.SelectAll();
+    private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
+        NetworkProfileTab.InvertSelection(DescGrid, _descriptions);
 
     private void BtnReset_Click(object sender, RoutedEventArgs e)
     {
-        var sel = _descriptions.Where(d => d.IsSelected).ToList();
-        if (sel.Count == 0) { MessageBox.Show("请选择至少一个设备描述进行重置。"); return; }
+        var sel = GetSelected();
+        if (sel.Count == 0) { MessageBox.Show("请先选中至少一个设备描述进行重置。"); return; }
         var names = string.Join("\n", sel.Select(d => $"  - {d.Name} ({d.InstanceCountDisplay})"));
         if (MessageBox.Show($"确定要将以下 {sel.Count} 个设备描述重置为单实例？\n\n{names}\n\n重置后需要重新插拔网卡或重启生效。",
             "确认重置", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
@@ -45,8 +51,8 @@ public partial class DeviceDescriptionTab : UserControl
 
     private void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
-        var sel = _descriptions.Where(d => d.IsSelected).ToList();
-        if (sel.Count == 0) { MessageBox.Show("请选择至少一个设备描述进行删除。"); return; }
+        var sel = GetSelected();
+        if (sel.Count == 0) { MessageBox.Show("请先选中至少一个设备描述进行删除。"); return; }
         var names = string.Join("\n", sel.Select(d => $"  - {d.Name}"));
         if (MessageBox.Show($"确定要删除以下 {sel.Count} 个设备描述条目？\n\n{names}\n\n此操作不可撤销（但可通过备份恢复）。",
             "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;

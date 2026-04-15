@@ -68,8 +68,10 @@ dotnet publish -c Release --self-contained -r win-x64 -p:PublishSingleFile=true
 ## 快捷功能
 
 - **状态栏按钮**: 网络适配器 (ncpa.cpl)、设备管理器 (devmgmt.msc)、备份注册表
-- **右键菜单**: 复制选中值、在 RegEdit 中打开（自动检测中文/英文 Windows 前缀）
-- **单击勾选**: CheckBox 单击即勾选，无需双击
+- **右键菜单**: 包含所有操作项（重命名、删除、设公用/专用等）+ 复制选中值 + 在 RegEdit 中打开
+- **行选择**: 点击选中，Ctrl+点击多选，Shift+点击范围选
+- **全选/反选**: 每个 Tab 顶部按钮
+- **自然排序**: 点击列头排序使用 StrCmpLogicalW（"连接 2" < "连接 10"）
 
 ## 技术细节
 
@@ -77,3 +79,4 @@ dotnet publish -c Release --self-contained -r win-x64 -p:PublishSingleFile=true
 - **P/Invoke**: 使用 `SetupDi*` API 族枚举设备树，`CM_Get_DevNode_Status` 判断设备是否存在
 - **注册表**: 使用 `Microsoft.Win32.Registry` 读写，Descriptions 键为 REG_MULTI_SZ 格式
 - **RegEdit 导航**: 自动检测本地化前缀（中文"计算机"/英文"Computer"），通过 LastKey 定位
+- **自然排序**: 通过 P/Invoke `shlwapi.dll!StrCmpLogicalW` 实现，列头排序也使用 `ListCollectionView.CustomSort`
