@@ -12,25 +12,35 @@
         </StackPanel>
         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
                    Text="管理「以太网」「WLAN」「以太网 2」「本地连接 *3」等连接名称。Ctrl+点击多选，Shift+点击范围选。"/>
-        <DataGrid x:Name="ConnectionGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                  IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                  HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
-                  Sorting="Grid_Sorting">
-            <DataGrid.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="重命名" Click="BtnRename_Click" FontWeight="Bold"/>
-                    <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
-                    <Separator/>
-                    <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
-                    <MenuItem Header="在 RegEdit 中打开" Click="MenuOpenRegEdit_Click"/>
-                </ContextMenu>
-            </DataGrid.ContextMenu>
-            <DataGrid.Columns>
-                <DataGridTextColumn Binding="{Binding Name}" Header="连接名称" Width="180"/>
-                <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" Width="80"/>
-                <DataGridTextColumn Binding="{Binding PnpInstanceId}" Header="PnpInstanceID" Width="280"/>
-                <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" Width="280"/>
-            </DataGrid.Columns>
-        </DataGrid>
+        <Grid>
+            <DataGrid x:Name="ConnectionGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                      IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
+                      Sorting="Grid_Sorting">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="重命名" Click="BtnRename_Click" FontWeight="Bold"/>
+                        <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
+                        <Separator/>
+                        <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
+                        <MenuItem Header="在 RegEdit 中打开" Click="MenuOpenRegEdit_Click"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Binding="{Binding Name}" Header="连接名称" Width="180"/>
+                    <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" Width="80"/>
+                    <DataGridTextColumn Binding="{Binding PnpInstanceId}" Header="PnpInstanceID" Width="280"/>
+                    <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" Width="280"/>
+                </DataGrid.Columns>
+            </DataGrid>
+            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
+                    <TextBlock Text="&#x1F4E1;" FontSize="48" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="暂无连接名称" FontSize="16" Foreground="#666" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="未检测到网络适配器连接名称。请检查设备管理器中的网络适配器状态。" FontSize="12" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
+                    <Button Content="刷新" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnRefresh_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
     </DockPanel>
 </UserControl>

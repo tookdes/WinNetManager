@@ -1,0 +1,58 @@
+<UserControl x:Class="WinNetManager.Views.DhcpTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel Margin="8">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+            <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
+            <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
+            <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
+            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Button Content="IPv4 释放+续租" Padding="12,4" Margin="6,0,0,0" Click="BtnReleaseRenew4_Click"
+                    ToolTip="先释放再续租 IPv4 地址（适用于远程机器，命令后台链式执行）"/>
+            <Button Content="IPv6 释放+续租" Padding="12,4" Margin="6,0,0,0" Click="BtnReleaseRenew6_Click"
+                    ToolTip="先释放再续租 IPv6 地址（适用于远程机器，命令后台链式执行）"/>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
+                   Text="管理网卡 IP 配置，支持 DHCP 释放与续租。远程机器也能安全使用——命令在后台链式执行，网络断开不影响续租。"/>
+        <Grid>
+            <DataGrid x:Name="AdapterGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                      IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
+                      ColumnWidth="Auto" Sorting="Grid_Sorting">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="IPv4 释放+续租" Click="BtnReleaseRenew4_Click"/>
+                        <MenuItem Header="IPv6 释放+续租" Click="BtnReleaseRenew6_Click"/>
+                        <Separator/>
+                        <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Binding="{Binding Name}" Header="网卡名称" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding Description}" Header="描述" Width="*"/>
+                    <DataGridTextColumn Binding="{Binding Status}" Header="状态" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding DhcpStatusDisplay}" Width="Auto">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="配置方式" ToolTip="DHCP = 自动获取 IP；Static = 手动指定 IP"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding IPv4Address}" Header="IPv4 地址" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding IPv6Address}" Header="IPv6 地址" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding MacAddress}" Width="Auto">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="MAC 地址" ToolTip="媒体访问控制地址，网卡的物理硬件地址"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
+                    <TextBlock Text="&#x1F4E1;" FontSize="48" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="未检测到网卡" FontSize="16" Foreground="#666" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="无法获取网络适配器信息。请确保以管理员身份运行本工具。" FontSize="12" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
+                    <Button Content="刷新" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnRefresh_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

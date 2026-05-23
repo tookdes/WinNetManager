@@ -25,6 +25,7 @@ public partial class GhostAdapterTab : UserControl
             foreach (var a in GhostAdapterService.GetAllNetworkAdapters()) _adapters.Add(a);
             int ghosts = _adapters.Count(a => !a.IsPresent);
             SetStatus($"已加载 {_adapters.Count} 个网络适配器（{ghosts} 个幽灵设备）");
+            EmptyState.Visibility = _adapters.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (Exception ex) { MessageBox.Show($"枚举网络适配器失败：\n{ex.Message}"); }
     }

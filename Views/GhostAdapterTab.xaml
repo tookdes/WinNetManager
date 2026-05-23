@@ -11,22 +11,32 @@
         </StackPanel>
         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray" TextWrapping="Wrap"
                    Text="枚举所有网络适配器设备（含设备管理器中隐藏的幽灵设备）。注意：WAN Miniport 等系统虚拟设备虽显示为幽灵，但不应卸载。Ctrl+点击多选。"/>
-        <DataGrid x:Name="AdapterGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                  IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                  HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8">
-            <DataGrid.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="卸载" Click="BtnRemove_Click" Foreground="Red"/>
-                    <Separator/>
-                    <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
-                </ContextMenu>
-            </DataGrid.ContextMenu>
-            <DataGrid.Columns>
-                <DataGridTextColumn Binding="{Binding FriendlyName}" Header="设备名称" Width="250"/>
-                <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" Width="70"/>
-                <DataGridTextColumn Binding="{Binding Description}" Header="描述" Width="200"/>
-                <DataGridTextColumn Binding="{Binding DeviceInstanceId}" Header="实例 ID" Width="*"/>
-            </DataGrid.Columns>
-        </DataGrid>
+        <Grid>
+            <DataGrid x:Name="AdapterGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                      IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="卸载" Click="BtnRemove_Click" Foreground="Red"/>
+                        <Separator/>
+                        <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Binding="{Binding FriendlyName}" Header="设备名称" Width="250"/>
+                    <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" Width="70"/>
+                    <DataGridTextColumn Binding="{Binding Description}" Header="描述" Width="200"/>
+                    <DataGridTextColumn Binding="{Binding DeviceInstanceId}" Header="实例 ID" Width="*"/>
+                </DataGrid.Columns>
+            </DataGrid>
+            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
+                    <TextBlock Text="&#x1F47B;" FontSize="48" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="未发现幽灵网卡" FontSize="16" Foreground="#666" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="所有网络适配器均正常显示。如果之前卸载过驱动，以管理员身份运行可能发现残留设备。" FontSize="12" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
+                    <Button Content="刷新" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnRefresh_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
     </DockPanel>
 </UserControl>

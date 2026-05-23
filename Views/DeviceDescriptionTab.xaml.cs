@@ -24,6 +24,7 @@ public partial class DeviceDescriptionTab : UserControl
             _descriptions.Clear();
             foreach (var d in DeviceDescriptionService.GetAllDescriptions()) _descriptions.Add(d);
             SetStatus($"已加载 {_descriptions.Count} 个设备描述");
+            EmptyState.Visibility = _descriptions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (Exception ex) { MessageBox.Show($"读取设备描述失败：\n{ex.Message}"); }
     }

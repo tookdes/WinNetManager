@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using WinNetManager.Services;
 
 namespace WinNetManager;
@@ -14,6 +15,12 @@ public partial class MainWindow : Window
     public void SetStatus(string message)
     {
         StatusText.Text = message;
+    }
+
+    public void SetCommandPreview(string command)
+    {
+        TxtCommandPreview.Text = command;
+        CmdPreviewExpander.IsExpanded = true;
     }
 
     private void BtnNcpa_Click(object sender, RoutedEventArgs e)
@@ -77,6 +84,119 @@ public partial class MainWindow : Window
         {
             MessageBox.Show($"备份失败：\n{ex.Message}", "错误",
                 MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void BtnFirewall_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "wf.msc",
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    }
+
+    private void BtnHosts_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string hostsPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                "System32", "drivers", "etc", "hosts");
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "notepad.exe",
+                Arguments = $"\"{hostsPath}\"",
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    }
+
+    private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        bool inTextInput = e.OriginalSource is System.Windows.Controls.TextBox
+            || e.OriginalSource is System.Windows.Controls.PasswordBox;
+
+        if (e.KeyboardDevice.Modifiers == System.Windows.Input.ModifierKeys.Control)
+        {
+            switch (e.Key)
+            {
+                // 以下快捷键在文本框中仍允许触发
+                case System.Windows.Input.Key.R:
+                    InvokeActiveTab("BtnRefresh_Click");
+                    e.Handled = true;
+                    break;
+                case System.Windows.Input.Key.I:
+                    InvokeActiveTab("BtnInvertSelection_Click");
+                    e.Handled = true;
+                    break;
+                case System.Windows.Input.Key.N:
+                    if (!TryInvokeMethod("BtnNew_Click"))
+                        TryInvokeMethod("BtnAdd_Click");
+                    e.Handled = true;
+                    break;
+                case System.Windows.Input.Key.F:
+                    FocusFilter();
+                    e.Handled = true;
+                    break;
+                // Ctrl+A 在文本框中保留给全选，不在文本框时触发表格全选
+                case System.Windows.Input.Key.A:
+                    if (!inTextInput)
+                    {
+                        InvokeActiveTab("BtnSelectAll_Click");
+                        e.Handled = true;
+                    }
+                    break;
+            }
+        }
+        else if (e.Key == System.Windows.Input.Key.Delete && !inTextInput)
+        {
+            InvokeActiveTab("BtnDelete_Click");
+            e.Handled = true;
+        }
+        else if (e.Key == System.Windows.Input.Key.F2 && !inTextInput)
+        {
+            if (!TryInvokeMethod("BtnEdit_Click"))
+                TryInvokeMethod("BtnRename_Click");
+            e.Handled = true;
+        }
+    }
+
+    private bool TryInvokeMethod(string methodName)
+    {
+        var active = TabControl.SelectedItem as TabItem;
+        if (active?.Content is not UserControl uc) return false;
+
+        var mi = uc.GetType().GetMethod(methodName, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        if (mi == null) return false;
+
+        try
+        {
+            mi.Invoke(uc, new object[] { this, System.Windows.RoutedEventArgs.Empty });
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private void InvokeActiveTab(string methodName)
+    {
+        TryInvokeMethod(methodName);
+    }
+
+    private void FocusFilter()
+    {
+        var active = TabControl.SelectedItem as TabItem;
+        if (active?.Content is not UserControl uc) return;
+
+        var filterBox = uc.FindName("TxtFilter") as System.Windows.Controls.TextBox;
+        if (filterBox != null)
+        {
+            filterBox.Focus();
+            filterBox.SelectAll();
         }
     }
 }

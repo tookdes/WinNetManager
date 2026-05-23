@@ -24,6 +24,7 @@ public partial class ConnectionNameTab : UserControl
             _connections.Clear();
             foreach (var c in ConnectionNameService.GetAllConnections()) _connections.Add(c);
             SetStatus($"已加载 {_connections.Count} 个连接");
+            EmptyState.Visibility = _connections.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (Exception ex) { MessageBox.Show($"读取连接信息失败：\n{ex.Message}"); }
     }

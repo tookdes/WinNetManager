@@ -12,21 +12,31 @@
         </StackPanel>
         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray" TextWrapping="Wrap"
                    Text="管理设备描述实例编号。值为使用中的实例编号列表（如 #1, #2）。重置后变为单实例 [1]，消除 #2 #3 后缀。建议先清理幽灵网卡再重置。Ctrl+点击多选。"/>
-        <DataGrid x:Name="DescGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                  IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                  HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8">
-            <DataGrid.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="重置为单实例" Click="BtnReset_Click"/>
-                    <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
-                    <Separator/>
-                    <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
-                </ContextMenu>
-            </DataGrid.ContextMenu>
-            <DataGrid.Columns>
-                <DataGridTextColumn Binding="{Binding Name}" Header="设备描述" Width="*"/>
-                <DataGridTextColumn Binding="{Binding InstanceCountDisplay}" Header="实例编号" Width="180"/>
-            </DataGrid.Columns>
-        </DataGrid>
+        <Grid>
+            <DataGrid x:Name="DescGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                      IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="重置为单实例" Click="BtnReset_Click"/>
+                        <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
+                        <Separator/>
+                        <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Binding="{Binding Name}" Header="设备描述" Width="*"/>
+                    <DataGridTextColumn Binding="{Binding InstanceCountDisplay}" Header="实例编号" Width="180"/>
+                </DataGrid.Columns>
+            </DataGrid>
+            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
+                    <TextBlock Text="&#x1F4BE;" FontSize="48" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="暂无设备描述实例" FontSize="16" Foreground="#666" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="未检测到需要管理的设备描述实例。通常在存在多个同名网卡时才会产生实例编号。" FontSize="12" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
+                    <Button Content="刷新" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnRefresh_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
     </DockPanel>
 </UserControl>

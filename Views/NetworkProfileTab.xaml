@@ -14,33 +14,43 @@
         </StackPanel>
         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
                    Text="管理「网络」「网络 2」「网络 3」等网络位置配置文件。Ctrl+点击多选，Shift+点击范围选。"/>
-        <DataGrid x:Name="ProfileGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                  IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                  HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
-                  ColumnWidth="Auto" Sorting="Grid_Sorting">
-            <DataGrid.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="重命名" Click="BtnRename_Click" FontWeight="Bold"/>
-                    <MenuItem Header="设为公用" Click="BtnSetPublic_Click"/>
-                    <MenuItem Header="设为专用" Click="BtnSetPrivate_Click"/>
-                    <Separator/>
-                    <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
-                    <Separator/>
-                    <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
-                    <MenuItem Header="在 RegEdit 中打开" Click="MenuOpenRegEdit_Click"/>
-                </ContextMenu>
-            </DataGrid.ContextMenu>
-            <DataGrid.Columns>
-                <DataGridTextColumn Binding="{Binding ProfileName}" Header="名称" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding CategoryDisplay}" Header="类别" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding Description}" Header="描述" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding DateCreated, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"
-                                    Header="创建时间" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding DateLastConnected, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"
-                                    Header="最后连接" Width="Auto"/>
-                <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" Width="Auto"/>
-            </DataGrid.Columns>
-        </DataGrid>
+        <Grid>
+            <DataGrid x:Name="ProfileGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                      IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
+                      ColumnWidth="Auto" Sorting="Grid_Sorting">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="重命名" Click="BtnRename_Click" FontWeight="Bold"/>
+                        <MenuItem Header="设为公用" Click="BtnSetPublic_Click"/>
+                        <MenuItem Header="设为专用" Click="BtnSetPrivate_Click"/>
+                        <Separator/>
+                        <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
+                        <Separator/>
+                        <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
+                        <MenuItem Header="在 RegEdit 中打开" Click="MenuOpenRegEdit_Click"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Binding="{Binding ProfileName}" Header="名称" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding CategoryDisplay}" Header="类别" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding StatusDisplay}" Header="状态" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding Description}" Header="描述" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding DateCreated, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"
+                                        Header="创建时间" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding DateLastConnected, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"
+                                        Header="最后连接" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" Width="Auto"/>
+                </DataGrid.Columns>
+            </DataGrid>
+            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
+                    <TextBlock Text="&#x1F4C4;" FontSize="48" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="暂无网络配置文件" FontSize="16" Foreground="#666" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="Windows 会自动创建网络配置文件，连接新网络后点击刷新即可查看。" FontSize="12" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
+                    <Button Content="刷新" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnRefresh_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
     </DockPanel>
 </UserControl>

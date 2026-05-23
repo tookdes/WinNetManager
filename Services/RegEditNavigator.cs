@@ -16,7 +16,14 @@ public static class RegEditNavigator
 
         foreach (var proc in Process.GetProcessesByName("regedit"))
         {
-            try { proc.Kill(); proc.WaitForExit(5000); } catch { }
+            try
+            {
+                // 先尝试优雅关闭（允许用户保存），超时后再强制结束
+                if (!proc.CloseMainWindow())
+                    proc.Kill();
+                proc.WaitForExit(5000);
+            }
+            catch { }
         }
         Thread.Sleep(500);
 

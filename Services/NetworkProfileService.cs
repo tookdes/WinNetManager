@@ -87,6 +87,8 @@ public static class NetworkProfileService
     /// <summary>
     /// Parses a SYSTEMTIME-style 16-byte blob (used by NetworkList Profiles)
     /// into a DateTime. Returns null if the data is invalid.
+    /// Layout: wYear(0), wMonth(2), wDayOfWeek(4) — skipped, wDay(6), wHour(8), wMinute(10), wSecond(12), wMilliseconds(14).
+    /// Defends against FILETIME (8 bytes) by checking length, and against garbage by range checks.
     /// </summary>
     private static DateTime? ParseFileTimeBlob(byte[]? data)
     {
@@ -95,13 +97,17 @@ public static class NetworkProfileService
         {
             int year = BitConverter.ToInt16(data, 0);
             int month = BitConverter.ToInt16(data, 2);
+            // offset 4 = wDayOfWeek, not needed for DateTime
             int day = BitConverter.ToInt16(data, 6);
             int hour = BitConverter.ToInt16(data, 8);
             int minute = BitConverter.ToInt16(data, 10);
             int second = BitConverter.ToInt16(data, 12);
+            int ms = BitConverter.ToInt16(data, 14);
             if (year < 1601 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31)
                 return null;
-            return new DateTime(year, month, day, hour, minute, second, DateTimeKind.Utc).ToLocalTime();
+            if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 || ms < 0 || ms > 999)
+                return null;
+            return new DateTime(year, month, day, hour, minute, second, ms, DateTimeKind.Utc).ToLocalTime();
         }
         catch
         {

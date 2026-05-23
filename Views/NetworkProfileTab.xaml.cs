@@ -30,6 +30,7 @@ public partial class NetworkProfileTab : UserControl
                 _profiles.Add(p);
             }
             SetStatus($"已加载 {_profiles.Count} 个网络配置文件");
+            EmptyState.Visibility = _profiles.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (Exception ex)
         {
@@ -52,7 +53,7 @@ public partial class NetworkProfileTab : UserControl
         var selected = GetSelected();
         if (selected.Count != 1) { MessageBox.Show("请选择一个配置文件进行重命名。"); return; }
         var p = selected[0];
-        string? n = PromptInput("重命名网络配置文件", $"当前名称: {p.ProfileName}\n请输入新名称:", p.ProfileName);
+        string? n = PromptInput("重命名网络配置文件", $"当前名称: {p.ProfileName}\n请输入新名称:", p.ProfileName, Window.GetWindow(this));
         if (n == null || n == p.ProfileName) return;
         try
         {
@@ -138,18 +139,18 @@ public partial class NetworkProfileTab : UserControl
 
     internal static void InvertSelection<T>(DataGrid grid, IList<T> allItems)
     {
-        var currentlySelected = new HashSet<T>(grid.SelectedItems.Cast<T>());
+        var currentlySelected = grid.SelectedItems.Cast<object>().ToList();
         grid.SelectedItems.Clear();
         foreach (var item in allItems)
         {
-            if (!currentlySelected.Contains(item))
+            if (item is not null && !currentlySelected.Contains(item))
                 grid.SelectedItems.Add(item);
         }
     }
 
-    internal static string? PromptInput(string title, string prompt, string defaultValue)
+    internal static string? PromptInput(string title, string prompt, string defaultValue, Window? owner = null)
     {
-        var dlg = new Window { Title = title, Width = 400, Height = 180, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
+        var dlg = new Window { Title = title, Width = 400, Height = 180, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize, Owner = owner ?? Application.Current.MainWindow };
         var sp = new StackPanel { Margin = new Thickness(16) };
         sp.Children.Add(new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
         var tb = new TextBox { Text = defaultValue };
