@@ -147,7 +147,12 @@ public partial class PortProxyTab : UserControl
                 MessageBox.Show($"删除原规则失败：{delRes.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
-            _manager.DeleteFirewallRule(original);
+            var delFwRes = _manager.DeleteFirewallRule(original);
+            if (!delFwRes.Success && !delFwRes.Message.Contains("找不到"))
+            {
+                MessageBox.Show($"原端口转发已删除，但旧防火墙规则删除失败：\n{delFwRes.Message}",
+                    "防火墙警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
 
             cmdPreview.AppendLine($"netsh interface portproxy add {edited.Direction} listenaddress=\"{edited.ListenAddress}\" listenport=\"{edited.ListenPort}\" connectaddress=\"{edited.ConnectAddress}\" connectport=\"{edited.ConnectPort}\" protocol=\"{edited.Protocol}\"");
             cmdPreview.AppendLine($"netsh advfirewall firewall add rule name=\"{PortProxyManager.GetFirewallRuleName(edited)}\" dir=in action=allow protocol={edited.Protocol} localport={edited.ListenPort}");

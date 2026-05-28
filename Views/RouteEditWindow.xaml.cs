@@ -429,10 +429,18 @@ public partial class RouteEditWindow : Window
 
     private void BtnToggleCalc_Click(object sender, RoutedEventArgs e)
     {
+        string family = (CmbAddressFamily.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "IPv4";
+        if (family == "IPv6")
+        {
+            TbkCalcResult.Text = "IPv6 range calculation is not supported. Please enter CIDR manually.";
+            TbkCalcResult.Foreground = System.Windows.Media.Brushes.DarkOrange;
+            return;
+        }
+
         bool visible = GridCalc.Visibility == Visibility.Visible;
         GridCalc.Visibility = visible ? Visibility.Collapsed : Visibility.Visible;
         TbkCalcResult.Text = "";
-        BtnToggleCalc.Content = visible ? "不知道掩码？使用范围计算器" : "隐藏范围计算器";
+        BtnToggleCalc.Content = visible ? "Use range calculator" : "Hide range calculator";
     }
 
     private void BtnCalc_Click(object sender, RoutedEventArgs e)
@@ -444,7 +452,9 @@ public partial class RouteEditWindow : Window
         string? result = CalculateMinCidr(start, end, family);
         if (result == null)
         {
-            TbkCalcResult.Text = "无法计算。请确保起始和结束 IP 都是有效的 {family} 地址，且起始 ≤ 结束。";
+            TbkCalcResult.Text = family == "IPv6"
+                ? "IPv6 range calculation is not supported. Please enter CIDR manually."
+                : "Unable to calculate. Make sure both IPs are valid IPv4 addresses. Start/end order can be swapped.";
             TbkCalcResult.Foreground = System.Windows.Media.Brushes.Red;
             return;
         }
@@ -455,6 +465,25 @@ public partial class RouteEditWindow : Window
         // 自动填入目标前缀框
         TxtDestinationPrefix.Text = result;
         SyncPrefixLengthFromText(result);
+    }
+
+    private void UpdateRangeCalculatorAvailability()
+    {
+        if (!IsLoaded) return;
+
+        string family = (CmbAddressFamily.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "IPv4";
+        if (family == "IPv6")
+        {
+            GridCalc.Visibility = Visibility.Collapsed;
+            BtnToggleCalc.Content = "IPv6 range calculation is not supported";
+            BtnToggleCalc.IsEnabled = false;
+            TbkCalcResult.Text = "";
+        }
+        else
+        {
+            BtnToggleCalc.IsEnabled = true;
+            BtnToggleCalc.Content = "Use range calculator";
+        }
     }
 
     private static string? CalculateMinCidr(string startStr, string endStr, string family)

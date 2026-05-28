@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 
@@ -15,28 +16,57 @@ public static class ProcessRunner
         return Run(fileName, arguments, out error, out _, timeoutMs);
     }
 
+    public static string Run(string fileName, IEnumerable<string> arguments, out string error, int timeoutMs = 30000)
+    {
+        return Run(fileName, arguments, out error, out _, timeoutMs);
+    }
+
     /// <summary>
     /// Runs an external process, reading stdout/stderr asynchronously to avoid deadlocks.
     /// Kills the process if it exceeds the timeout. Returns the process exit code.
     /// </summary>
     public static string Run(string fileName, string arguments, out string error, out int exitCode, int timeoutMs = 30000)
     {
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        return Run(psi, out error, out exitCode, timeoutMs);
+    }
+
+    public static string Run(string fileName, IEnumerable<string> arguments, out string error, out int exitCode, int timeoutMs = 30000)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        foreach (var arg in arguments)
+            psi.ArgumentList.Add(arg);
+
+        return Run(psi, out error, out exitCode, timeoutMs);
+    }
+
+    private static string Run(ProcessStartInfo psi, out string error, out int exitCode, int timeoutMs)
+    {
         error = "";
         exitCode = -1;
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-
             using var p = Process.Start(psi);
             if (p == null) return "";
 
@@ -53,6 +83,12 @@ public static class ProcessRunner
             if (!exited)
             {
                 try { p.Kill(); p.WaitForExit(5000); } catch { }
+                exitCode = -2;
+                error = $"Process timed out after {timeoutMs} ms.";
+                string timeoutError = errorBuilder.ToString();
+                if (!string.IsNullOrWhiteSpace(timeoutError))
+                    error += Environment.NewLine + timeoutError.Trim();
+                return outputBuilder.ToString();
             }
             else
             {

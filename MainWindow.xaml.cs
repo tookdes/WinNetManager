@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using WinNetManager.Services;
 
 namespace WinNetManager;
@@ -118,8 +119,7 @@ public partial class MainWindow : Window
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        bool inTextInput = e.OriginalSource is System.Windows.Controls.TextBox
-            || e.OriginalSource is System.Windows.Controls.PasswordBox;
+        bool inTextInput = IsTextInputFocus();
 
         if (e.KeyboardDevice.Modifiers == System.Windows.Input.ModifierKeys.Control)
         {
@@ -198,5 +198,22 @@ public partial class MainWindow : Window
             filterBox.Focus();
             filterBox.SelectAll();
         }
+    }
+
+    private static bool IsTextInputFocus()
+    {
+        DependencyObject? current = System.Windows.Input.Keyboard.FocusedElement as DependencyObject;
+        while (current != null)
+        {
+            if (current is TextBox or PasswordBox)
+                return true;
+
+            if (current is ComboBox comboBox && comboBox.IsEditable)
+                return true;
+
+            current = VisualTreeHelper.GetParent(current) ?? LogicalTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 }

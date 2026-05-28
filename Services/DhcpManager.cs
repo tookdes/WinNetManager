@@ -48,7 +48,7 @@ public class DhcpManager
     /// <summary>
     /// 链式执行 release + renew，确保即使当前网络会话断开，后台进程仍能完成操作。
     /// </summary>
-    private static string EscapeCmdArg(string arg) => arg.Replace("\"", "\"\"");
+    private static string QuotePreviewArg(string arg) => $"\"{arg.Replace("\"", "\"\"")}\"";
 
     /// <summary>
     /// Returns a human-readable command preview for Release+Renew.
@@ -56,54 +56,49 @@ public class DhcpManager
     /// </summary>
     public static string GetReleaseRenewCommandPreview(string adapterName, bool ipv6)
     {
-        string safe = EscapeCmdArg(adapterName);
         string releaseCmd = ipv6
-            ? $"ipconfig /release6 \"{safe}\""
-            : $"ipconfig /release \"{safe}\"";
+            ? $"ipconfig /release6 {QuotePreviewArg(adapterName)}"
+            : $"ipconfig /release {QuotePreviewArg(adapterName)}";
         string renewCmd = ipv6
-            ? $"ipconfig /renew6 \"{safe}\""
-            : $"ipconfig /renew \"{safe}\"";
-        return $"cmd /c \"{releaseCmd} && {renewCmd}\"";
+            ? $"ipconfig /renew6 {QuotePreviewArg(adapterName)}"
+            : $"ipconfig /renew {QuotePreviewArg(adapterName)}";
+        return $"{releaseCmd}\n{renewCmd}";
     }
 
     public DhcpResult ReleaseRenew(string adapterName, bool ipv6)
     {
-        string safe = EscapeCmdArg(adapterName);
-        string releaseCmd = ipv6
-            ? $"ipconfig /release6 \"{safe}\""
-            : $"ipconfig /release \"{safe}\"";
-        string renewCmd = ipv6
-            ? $"ipconfig /renew6 \"{safe}\""
-            : $"ipconfig /renew \"{safe}\"";
-
-        return RunChainCommand(releaseCmd, renewCmd, ipv6 ? "IPv6" : "IPv4");
+        string releaseSwitch = ipv6 ? "/release6" : "/release";
+        string renewSwitch = ipv6 ? "/renew6" : "/renew";
+        return RunChainCommand(releaseSwitch, renewSwitch, adapterName, ipv6 ? "IPv6" : "IPv4");
     }
 
     public DhcpResult Release(string adapterName, bool ipv6)
     {
-        string safe = EscapeCmdArg(adapterName);
-        string cmd = ipv6
-            ? $"ipconfig /release6 \"{safe}\""
-            : $"ipconfig /release \"{safe}\"";
-        return RunCommand(cmd);
+        string command = ipv6 ? "/release6" : "/release";
+        return RunIpConfig(command, adapterName, 60000);
     }
 
     public DhcpResult Renew(string adapterName, bool ipv6)
     {
-        string safe = EscapeCmdArg(adapterName);
-        string cmd = ipv6
-            ? $"ipconfig /renew6 \"{safe}\""
-            : $"ipconfig /renew \"{safe}\"";
-        return RunCommand(cmd);
+        string command = ipv6 ? "/renew6" : "/renew";
+        return RunIpConfig(command, adapterName, 60000);
     }
 
-    private static DhcpResult RunCommand(string command)
+    private static DhcpResult RunIpConfig(string command, string adapterName, int timeoutMs)
     {
         string error;
-        string output = ProcessRunner.Run("cmd.exe", $"/c {command}", out error, 60000);
+        string output = ProcessRunner.Run("ipconfig.exe", new[] { command, adapterName }, out error, out int exitCode, timeoutMs);
 
         if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
             return new DhcpResult { Success = false, Message = error.Trim() };
+
+        if (exitCode != 0)
+        {
+            string message = !string.IsNullOrWhiteSpace(output)
+                ? output.Trim()
+                : $"命令返回非零退出码 {exitCode}。";
+            return new DhcpResult { Success = false, Message = message };
+        }
 
         return new DhcpResult { Success = true, Message = output.Trim() };
     }
@@ -112,26 +107,26 @@ public class DhcpManager
     /// 链式执行两条命令：第一条执行完后立即执行第二条。
     /// 使用独立 cmd 进程，即使网络断开也能继续执行。
     /// </summary>
-    private static DhcpResult RunChainCommand(string firstCmd, string secondCmd, string protocolLabel)
+    private static DhcpResult RunChainCommand(string releaseSwitch, string renewSwitch, string adapterName, string protocolLabel)
     {
-        string error;
-        string output = ProcessRunner.Run("cmd.exe", $"/c \"{firstCmd} && {secondCmd}\"", out error, out int exitCode, 120000);
+        var outputParts = new List<string>();
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
-            return new DhcpResult { Success = false, Message = error.Trim() };
+        var release = RunIpConfig(releaseSwitch, adapterName, 60000);
+        if (!string.IsNullOrWhiteSpace(release.Message))
+            outputParts.Add(release.Message);
+        if (!release.Success)
+            return release;
 
-        if (exitCode != 0)
-        {
-            string hint = output.Contains("无法") || output.Contains("error") || output.Contains("失败")
-                ? output.Trim()
-                : $"命令返回非零退出码 {exitCode}。";
-            return new DhcpResult { Success = false, Message = hint };
-        }
+        var renew = RunIpConfig(renewSwitch, adapterName, 60000);
+        if (!string.IsNullOrWhiteSpace(renew.Message))
+            outputParts.Add(renew.Message);
+        if (!renew.Success)
+            return renew;
 
         return new DhcpResult
         {
             Success = true,
-            Message = $"{protocolLabel} Release+Renew 已提交执行。\n\n{output.Trim()}"
+            Message = $"{protocolLabel} Release+Renew 已提交执行。\n\n{string.Join("\n", outputParts)}"
         };
     }
 }
