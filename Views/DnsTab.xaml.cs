@@ -15,11 +15,13 @@ public partial class DnsTab : UserControl
 {
     private readonly DnsNrptManager _manager = new();
     private readonly ObservableCollection<NrptRule> _rules = new();
+    private List<InterfaceDnsInfo> _allDns = new();
+    private ICollectionView? _dnsView;
+    private ICollectionView? _nrptView;
 
     public DnsTab()
     {
         InitializeComponent();
-        NrptGrid.ItemsSource = _rules;
         Loaded += (_, _) => RefreshData();
     }
 
@@ -30,14 +32,61 @@ public partial class DnsTab : UserControl
             _rules.Clear();
             foreach (var r in _manager.GetRules())
                 _rules.Add(r);
-            SetStatus($"已加载 {_rules.Count} 条 NRPT 规则");
-            EmptyState.Visibility = _rules.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            _nrptView = CollectionViewSource.GetDefaultView(_rules);
+            _nrptView.Filter = NrptFilter;
+            NrptGrid.ItemsSource = _nrptView;
+
+            _allDns = _manager.GetInterfaceDnsServers();
+            _dnsView = CollectionViewSource.GetDefaultView(_allDns);
+            _dnsView.Filter = DnsFilter;
+            InterfaceDnsGrid.ItemsSource = _dnsView;
+
+            UpdateCount();
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载 NRPT 规则失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"加载配置失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
+
+    private bool DnsFilter(object obj)
+    {
+        if (obj is not InterfaceDnsInfo item) return false;
+        var family = (CmbAddressFamily.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+        if (!string.IsNullOrEmpty(family) && item.AddressFamily != family) return false;
+
+        string filter = TxtFilter.Text?.Trim().ToLowerInvariant() ?? "";
+        if (string.IsNullOrEmpty(filter)) return true;
+
+        return (item.InterfaceAlias?.ToLowerInvariant().Contains(filter) == true)
+            || (item.ServerAddresses?.ToLowerInvariant().Contains(filter) == true);
+    }
+
+    private bool NrptFilter(object obj)
+    {
+        if (obj is not NrptRule item) return false;
+        string filter = TxtFilter.Text?.Trim().ToLowerInvariant() ?? "";
+        if (string.IsNullOrEmpty(filter)) return true;
+
+        return (item.Namespace?.ToLowerInvariant().Contains(filter) == true)
+            || (item.NameServers?.ToLowerInvariant().Contains(filter) == true)
+            || (item.Comment?.ToLowerInvariant().Contains(filter) == true);
+    }
+
+    private void UpdateCount()
+    {
+        int totalNrpt = _rules.Count;
+        int visibleNrpt = _nrptView?.Cast<object>().Count() ?? 0;
+        TbkNrptCount.Text = visibleNrpt == totalNrpt ? $"共 {totalNrpt} 条" : $"显示 {visibleNrpt} / 共 {totalNrpt} 条";
+        EmptyState.Visibility = visibleNrpt == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        int totalDns = _allDns.Count;
+        int visibleDns = _dnsView?.Cast<object>().Count() ?? 0;
+        TbkDnsCount.Text = visibleDns == totalDns ? $"共 {totalDns} 条" : $"显示 {visibleDns} / 共 {totalDns} 条";
+    }
+
+    private List<InterfaceDnsInfo> GetSelectedDns() =>
+        InterfaceDnsGrid.SelectedItems.Cast<InterfaceDnsInfo>().ToList();
 
     private List<NrptRule> GetSelected() =>
         NrptGrid.SelectedItems.Cast<NrptRule>().ToList();
@@ -157,8 +206,128 @@ public partial class DnsTab : UserControl
         }
     }
 
-    private void MenuCopy_Click(object sender, RoutedEventArgs e) =>
+    private void MenuCopyDns_Click(object sender, RoutedEventArgs e) =>
+        NetworkProfileTab.CopySelectedCellValue(InterfaceDnsGrid);
+
+    private void MenuCopyNrpt_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.CopySelectedCellValue(NrptGrid);
+
+    private void Grid_Sorting(object sender, DataGridSortingEventArgs e)
+    {
+        e.Handled = true;
+        var dir = e.Column.SortDirection == ListSortDirection.Ascending
+            ? ListSortDirection.Descending
+            : ListSortDirection.Ascending;
+        e.Column.SortDirection = dir;
+        var grid = sender as DataGrid;
+        if (grid == null) return;
+        var view = CollectionViewSource.GetDefaultView(grid.ItemsSource);
+        view.SortDescriptions.Clear();
+        string prop = (e.Column as DataGridBoundColumn)?.Binding is Binding b ? b.Path.Path : "";
+        view.SortDescriptions.Add(new SortDescription(prop, dir));
+        if (view is ListCollectionView lcv)
+            lcv.CustomSort = new NaturalSortByProperty(prop, dir);
+    }
+
+    private void CmbAddressFamily_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _dnsView?.Refresh();
+        UpdateCount();
+    }
+
+    private void TxtFilter_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _dnsView?.Refresh();
+        _nrptView?.Refresh();
+        UpdateCount();
+    }
+
+    private void BtnClearFilter_Click(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        TxtFilter.Clear();
+        CmbAddressFamily.SelectedIndex = 0;
+        _dnsView?.Refresh();
+        _nrptView?.Refresh();
+        UpdateCount();
+    }
+
+    private void BtnEditDns_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = GetSelectedDns();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var defaultVal = selected.First().ServerAddresses;
+        string? input = NetworkProfileTab.PromptInput(
+            "修改 DNS 服务器",
+            $"为 {selected.Count} 个网卡设置新的 DNS 服务器地址（多个用逗号分隔）：\n" +
+            string.Join("\n", selected.Select(s => $"  • {s.InterfaceAlias} ({s.AddressFamily})")),
+            defaultVal,
+            Window.GetWindow(this));
+
+        if (input == null) return;
+
+        var errors = new List<string>();
+        foreach (var item in selected)
+        {
+            var result = _manager.SetInterfaceDns(item.InterfaceAlias, item.AddressFamily, input);
+            if (!result.Success)
+            {
+                errors.Add($"{item.InterfaceAlias} ({item.AddressFamily}): {result.Message}");
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            MessageBox.Show(
+                $"成功 {selected.Count - errors.Count}/{selected.Count} 个。\n\n失败项：\n{string.Join("\n", errors)}",
+                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        RefreshData();
+        SetStatus($"DNS 服务器已更新，{selected.Count - errors.Count}/{selected.Count} 成功");
+    }
+
+    private void BtnAutoDns_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = GetSelectedDns();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var names = string.Join("\n", selected.Select(s => $"  • {s.InterfaceAlias} ({s.AddressFamily})"));
+        if (MessageBox.Show($"确定要为以下 {selected.Count} 个网卡恢复为自动获取 DNS？\n\n{names}",
+            "确认自动获取", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        var errors = new List<string>();
+        foreach (var item in selected)
+        {
+            var result = _manager.SetInterfaceDns(item.InterfaceAlias, item.AddressFamily, "");
+            if (!result.Success)
+            {
+                errors.Add($"{item.InterfaceAlias} ({item.AddressFamily}): {result.Message}");
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            MessageBox.Show(
+                $"成功 {selected.Count - errors.Count}/{selected.Count} 个。\n\n失败项：\n{string.Join("\n", errors)}",
+                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        RefreshData();
+        SetStatus($"DNS 已设为自动获取，{selected.Count - errors.Count}/{selected.Count} 成功");
+    }
 
     private void MenuCopyAllResolve_Click(object sender, RoutedEventArgs e)
     {

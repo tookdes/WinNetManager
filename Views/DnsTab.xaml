@@ -8,57 +8,25 @@
             <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
             <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
             <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Button Content="修改网卡 DNS" Padding="12,4" Margin="6,0,0,0" Click="BtnEditDns_Click"/>
+            <Button Content="设为自动获取" Padding="12,4" Margin="6,0,0,0" Click="BtnAutoDns_Click"/>
+            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
             <Button Content="新建 NRPT 规则" Padding="12,4" Margin="6,0,0,0" Click="BtnAdd_Click"/>
-            <Button Content="删除" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnDelete_Click"/>
+            <Button Content="删除 NRPT" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnDelete_Click"/>
+            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <ComboBox x:Name="CmbAddressFamily" Width="52" Padding="2,2" Margin="4,0,0,0"
+                      VerticalContentAlignment="Center" SelectionChanged="CmbAddressFamily_SelectionChanged">
+                <ComboBoxItem Content="全部" Tag="" IsSelected="True"/>
+                <ComboBoxItem Content="IPv4" Tag="IPv4"/>
+                <ComboBoxItem Content="IPv6" Tag="IPv6"/>
+            </ComboBox>
+            <TextBox x:Name="TxtFilter" Width="100" Margin="4,0,0,0" Padding="4,2"
+                     TextChanged="TxtFilter_TextChanged" ToolTip="按名称筛选"/>
+            <Button Content="清除" Padding="8,4" Margin="4,0,0,0" Click="BtnClearFilter_Click"/>
         </StackPanel>
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
-            <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="Gray"
-                       Text="管理 Windows 名称解析策略表（NRPT），按域名后缀指定专用 DNS 服务器，解决双网卡 DNS 污染问题。"/>
-        </DockPanel>
-        <Grid DockPanel.Dock="Top" Height="180" Margin="0,0,0,8">
-            <DataGrid x:Name="NrptGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                      IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
-                      ColumnWidth="Auto">
-                <DataGrid.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="新建 NRPT 规则" Click="BtnAdd_Click"/>
-                        <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
-                        <Separator/>
-                        <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
-                    </ContextMenu>
-                </DataGrid.ContextMenu>
-                <DataGrid.Columns>
-                    <DataGridTextColumn Binding="{Binding Namespace}" Width="Auto">
-                        <DataGridTextColumn.Header>
-                            <TextBlock Text="域名后缀" ToolTip="要匹配的域名模式，如 *.corp.local 或 internal.com"/>
-                        </DataGridTextColumn.Header>
-                    </DataGridTextColumn>
-                    <DataGridTextColumn Binding="{Binding NameServers}" Width="Auto">
-                        <DataGridTextColumn.Header>
-                            <TextBlock Text="DNS 服务器" ToolTip="该域名使用的专用 DNS 服务器地址，多个用逗号分隔"/>
-                        </DataGridTextColumn.Header>
-                    </DataGridTextColumn>
-                    <DataGridTextColumn Binding="{Binding Comment}" Header="备注" Width="*"/>
-                    <DataGridTextColumn Binding="{Binding GpoName}" Width="Auto">
-                        <DataGridTextColumn.Header>
-                            <TextBlock Text="GPO" ToolTip="Group Policy Object：组策略对象名称，手动创建则显示 Local"/>
-                        </DataGridTextColumn.Header>
-                    </DataGridTextColumn>
-                </DataGrid.Columns>
-            </DataGrid>
-            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <TextBlock Text="&#x1F310;" FontSize="36" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
-                    <TextBlock Text="暂无 NRPT 规则" FontSize="14" Foreground="#666" HorizontalAlignment="Center" Margin="0,8,0,2" FontWeight="SemiBold"/>
-                    <TextBlock Text="点击「新建 NRPT 规则」添加，按域名后缀指定专用 DNS 服务器，解决双网卡 DNS 污染问题。" FontSize="11" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="400"/>
-                    <Button Content="新建 NRPT 规则" Padding="12,3" Margin="0,10,0,0" HorizontalAlignment="Center" Click="BtnAdd_Click"/>
-                </StackPanel>
-            </Border>
-        </Grid>
 
-        <!-- DNS 小工具 -->
-        <Grid DockPanel.Dock="Top" Margin="0,8,0,0">
+        <!-- DNS 小工具吸底 -->
+        <Grid DockPanel.Dock="Bottom" Margin="0,8,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="8"/>
@@ -75,7 +43,7 @@
                     </StackPanel>
                     <TextBlock DockPanel.Dock="Top" FontSize="11" Foreground="Gray" Margin="0,0,0,4"
                                Text="使用 Resolve-DnsName 解析域名，显示 A/AAAA/CNAME 记录。"/>
-                    <TextBox x:Name="TxtResolveResult" IsReadOnly="True"
+                    <TextBox x:Name="TxtResolveResult" IsReadOnly="True" Height="60"
                              Background="#F8F8F8" FontFamily="Consolas" FontSize="12"
                              TextWrapping="Wrap" VerticalScrollBarVisibility="Auto">
                         <TextBox.ContextMenu>
@@ -98,6 +66,78 @@
                     <TextBlock x:Name="TbkFlushResult" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
             </GroupBox>
+        </Grid>
+
+        <!-- 上下分屏表格 -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="5"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <DockPanel Grid.Row="0" Margin="0,0,0,4">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="Gray" Text="常规网卡 DNS (Interface DNS)"/>
+                    <TextBlock x:Name="TbkDnsCount" DockPanel.Dock="Right" FontSize="11" Foreground="Gray" HorizontalAlignment="Right"/>
+                </DockPanel>
+                <DataGrid x:Name="InterfaceDnsGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                          IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
+                          ColumnWidth="Auto" Sorting="Grid_Sorting">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Binding="{Binding InterfaceAlias}" Width="200" Header="网卡名称"/>
+                        <DataGridTextColumn Binding="{Binding AddressFamily}" Width="80" Header="协议"/>
+                        <DataGridTextColumn Binding="{Binding InterfaceIndex}" Width="80" Header="接口索引"/>
+                        <DataGridTextColumn Binding="{Binding ServerAddresses}" Width="*" Header="DNS 服务器"/>
+                    </DataGrid.Columns>
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="修改网卡 DNS" Click="BtnEditDns_Click"/>
+                            <MenuItem Header="设为自动获取" Click="BtnAutoDns_Click"/>
+                            <Separator/>
+                            <MenuItem Header="复制选中值" Click="MenuCopyDns_Click"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+                </DataGrid>
+            </DockPanel>
+
+            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#EEE"/>
+
+            <DockPanel Grid.Row="2" Margin="0,4,0,0">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="Gray" Text="高级名称解析策略表 (NRPT)"/>
+                    <TextBlock x:Name="TbkNrptCount" DockPanel.Dock="Right" FontSize="11" Foreground="Gray" HorizontalAlignment="Right"/>
+                </DockPanel>
+                <Grid>
+                    <DataGrid x:Name="NrptGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                              IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
+                              ColumnWidth="Auto" Sorting="Grid_Sorting">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Binding="{Binding Namespace}" Width="200" Header="域名后缀"/>
+                            <DataGridTextColumn Binding="{Binding NameServers}" Width="200" Header="DNS 服务器"/>
+                            <DataGridTextColumn Binding="{Binding Comment}" Header="备注" Width="100"/>
+                            <DataGridTextColumn Binding="{Binding GpoName}" Width="100" Header="GPO"/>
+                        </DataGrid.Columns>
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="新建 NRPT 规则" Click="BtnAdd_Click"/>
+                                <MenuItem Header="删除 NRPT" Click="BtnDelete_Click" Foreground="Red"/>
+                                <Separator/>
+                                <MenuItem Header="复制选中值" Click="MenuCopyNrpt_Click"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                    </DataGrid>
+                    <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="&#x1F310;" FontSize="36" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
+                            <TextBlock Text="暂无 NRPT 规则" FontSize="14" Foreground="#666" HorizontalAlignment="Center" Margin="0,8,0,2" FontWeight="SemiBold"/>
+                            <Button Content="新建 NRPT 规则" Padding="12,3" Margin="0,10,0,0" HorizontalAlignment="Center" Click="BtnAdd_Click"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </DockPanel>
         </Grid>
     </DockPanel>
 </UserControl>

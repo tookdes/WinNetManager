@@ -11,9 +11,11 @@
                     ToolTip="先释放再续租 IPv4 地址（适用于远程机器，命令后台链式执行）"/>
             <Button Content="IPv6 释放+续租" Padding="12,4" Margin="6,0,0,0" Click="BtnReleaseRenew6_Click"
                     ToolTip="先释放再续租 IPv6 地址（适用于远程机器，命令后台链式执行）"/>
+            <Button Content="重启网卡" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnRestartAdapter_Click"
+                    ToolTip="安全地禁用并重新启用网卡（后台原子操作，适用于远程机器断网自启）"/>
         </StackPanel>
         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
-                   Text="管理网卡 IP 配置，支持 DHCP 释放与续租。远程机器也能安全使用——命令在后台链式执行，网络断开不影响续租。"/>
+                   Text="管理网卡 IP 配置，支持 DHCP 释放/续租与网卡重启。远程机器也能安全使用——命令在后台执行，网络断开不影响操作完成。"/>
         <Grid>
             <DataGrid x:Name="AdapterGrid" AutoGenerateColumns="False" CanUserAddRows="False"
                       IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
@@ -23,6 +25,8 @@
                     <ContextMenu>
                         <MenuItem Header="IPv4 释放+续租" Click="BtnReleaseRenew4_Click"/>
                         <MenuItem Header="IPv6 释放+续租" Click="BtnReleaseRenew6_Click"/>
+                        <Separator/>
+                        <MenuItem Header="重启网卡" Click="BtnRestartAdapter_Click" Foreground="Red"/>
                         <Separator/>
                         <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
                     </ContextMenu>

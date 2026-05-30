@@ -56,6 +56,51 @@ public partial class DhcpTab : UserControl
     private void BtnReleaseRenew6_Click(object sender, RoutedEventArgs e) =>
         DoReleaseRenew(ipv6: true);
 
+    private void BtnRestartAdapter_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = GetSelected();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var names = string.Join("\n", selected.Select(a => $"  • {a.Name}"));
+        var result = MessageBox.Show(
+            $"确定要重启以下 {selected.Count} 个网卡？\n\n{names}\n\n" +
+            "重启网卡会导致几秒钟的网络闪断，但在后台会自动重连。即使远程连接瞬间断开，稍后也能恢复。确定要继续吗？",
+            "确认重启网卡",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (result != MessageBoxResult.Yes) return;
+
+        var successful = new List<NetworkAdapterInfo>();
+        var errors = new List<string>();
+        foreach (var adapter in selected)
+        {
+            var res = _manager.RestartAdapter(adapter.Name);
+            if (res.Success) successful.Add(adapter);
+            else errors.Add($"{adapter.Name}: {res.Message}");
+        }
+
+        if (successful.Count > 0)
+        {
+            SetStatus($"提交重启 {successful.Count}/{selected.Count} 个网卡，5 秒后自动刷新...");
+            _ = AutoRefreshAfterDelay(5000);
+            var cmdPreview = string.Join("\n", successful
+                .Select(a => DhcpManager.GetRestartAdapterCommandPreview(a.Name)));
+            if (Window.GetWindow(this) is MainWindow mw) mw.SetCommandPreview(cmdPreview);
+        }
+
+        if (errors.Count > 0)
+        {
+            MessageBox.Show(
+                $"成功提交重启 {successful.Count}/{selected.Count} 个网卡。\n\n失败项：\n{string.Join("\n", errors)}",
+                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private void DoReleaseRenew(bool ipv6)
     {
         var selected = GetSelected();

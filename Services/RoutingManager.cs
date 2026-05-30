@@ -133,6 +133,7 @@ public class RoutingManager
             $"-DestinationPrefix '{ProcessRunner.EscapePsSingleQuoted(route.DestinationPrefix)}' " +
             $"-InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias)}' " +
             $"-NextHop '{ProcessRunner.EscapePsSingleQuoted(route.NextHop)}' " +
+            $"-RouteMetric {route.RouteMetric} " +
             $"-PolicyStore PersistentStore -Confirm:$false";
 
         return ExecuteWritePowerShell(script);
@@ -172,7 +173,15 @@ public class RoutingManager
             char c = line[i];
             if (c == '"')
             {
-                inQuotes = !inQuotes;
+                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    sb.Append('"');
+                    i++;
+                }
+                else
+                {
+                    inQuotes = !inQuotes;
+                }
             }
             else if (c == ',' && !inQuotes)
             {

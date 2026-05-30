@@ -131,6 +131,9 @@ public class PortProxyManager
 
     public PortProxyResult ResetAll()
     {
+        // 先清理本工具创建的防火墙规则
+        CleanupFirewallRules();
+
         string error;
         RunCommand("netsh", "interface portproxy reset", out error);
 
@@ -140,6 +143,13 @@ public class PortProxyManager
         }
 
         return new PortProxyResult { Success = true };
+    }
+
+    private void CleanupFirewallRules()
+    {
+        // 通过 PowerShell 删除所有 WinNetManager_PortProxy_ 前缀的防火墙规则
+        string script = "Get-NetFirewallRule -DisplayName 'WinNetManager_PortProxy_*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue";
+        ProcessRunner.RunPowerShell(script, out _, 10000);
     }
 
     // --- 防火墙联动 ---
@@ -248,9 +258,16 @@ public class PortProxyManager
         if (!delRes.Success && !delRes.Message.Contains("找不到"))
             return delRes;
 
+        bool oldRuleExisted = delRes.Success;
+
         var addRes = AddFirewallRule(newRule);
         if (!addRes.Success)
+        {
+            // 回滚：重新添加旧防火墙规则
+            if (oldRuleExisted)
+                AddFirewallRule(oldRule);
             return addRes;
+        }
 
         return new PortProxyResult { Success = true };
     }

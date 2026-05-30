@@ -72,6 +72,23 @@ public class DhcpManager
         return RunChainCommand(releaseSwitch, renewSwitch, adapterName, ipv6 ? "IPv6" : "IPv4");
     }
 
+    public static string GetRestartAdapterCommandPreview(string adapterName)
+    {
+        return $"Restart-NetAdapter -Name '{ProcessRunner.EscapePsSingleQuoted(adapterName)}' -Confirm:$false";
+    }
+
+    public DhcpResult RestartAdapter(string adapterName)
+    {
+        string script = $"Restart-NetAdapter -Name '{ProcessRunner.EscapePsSingleQuoted(adapterName)}' -Confirm:$false";
+        string error;
+        string output = ProcessRunner.RunPowerShell(script, out error, 20000);
+
+        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+            return new DhcpResult { Success = false, Message = error.Trim() };
+
+        return new DhcpResult { Success = true, Message = "网卡已成功重启。" };
+    }
+
     public DhcpResult Release(string adapterName, bool ipv6)
     {
         string command = ipv6 ? "/release6" : "/release";
@@ -110,22 +127,33 @@ public class DhcpManager
     private static DhcpResult RunChainCommand(string releaseSwitch, string renewSwitch, string adapterName, string protocolLabel)
     {
         var outputParts = new List<string>();
+        bool anyFailed = false;
 
         var release = RunIpConfig(releaseSwitch, adapterName, 60000);
         if (!string.IsNullOrWhiteSpace(release.Message))
             outputParts.Add(release.Message);
         if (!release.Success)
-            return release;
+            anyFailed = true;
 
+        // 即使 release 失败（如地址已释放），仍继续执行 renew
         var renew = RunIpConfig(renewSwitch, adapterName, 60000);
         if (!string.IsNullOrWhiteSpace(renew.Message))
             outputParts.Add(renew.Message);
         if (!renew.Success)
-            return renew;
+            anyFailed = true;
+
+        if (!release.Success && !renew.Success)
+        {
+            return new DhcpResult
+            {
+                Success = false,
+                Message = $"{protocolLabel} Release+Renew 均失败。\n\n{string.Join("\n", outputParts)}"
+            };
+        }
 
         return new DhcpResult
         {
-            Success = true,
+            Success = !anyFailed,
             Message = $"{protocolLabel} Release+Renew 已提交执行。\n\n{string.Join("\n", outputParts)}"
         };
     }

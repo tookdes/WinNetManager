@@ -43,7 +43,7 @@
         <Grid Grid.Row="2">
             <DataGrid x:Name="RoutesGrid" AutoGenerateColumns="False" CanUserAddRows="False"
                       IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
+                      HeadersVisibility="Column" AlternationCount="2"
                       ColumnWidth="Auto" Sorting="Grid_Sorting">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
@@ -57,7 +57,11 @@
                 </DataGrid.ContextMenu>
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
+                        <Setter Property="Background" Value="White"/>
                         <Style.Triggers>
+                            <Trigger Property="ItemsControl.AlternationIndex" Value="1">
+                                <Setter Property="Background" Value="#F8F8F8"/>
+                            </Trigger>
                             <DataTrigger Binding="{Binding Status}" Value="Modified">
                                 <Setter Property="Background" Value="#FFF9E6"/>
                             </DataTrigger>
@@ -65,8 +69,10 @@
                                 <Setter Property="Background" Value="#E6F9E6"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Status}" Value="Deleted">
-                                <Setter Property="Background" Value="#F0F0F0"/>
-                                <Setter Property="Foreground" Value="Gray"/>
+                                <Setter Property="Background" Value="#F4F4F4"/>
+                                <Setter Property="Foreground" Value="#AAA"/>
+                                <Setter Property="FontStyle" Value="Italic"/>
+                                <Setter Property="Opacity" Value="0.6"/>
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>

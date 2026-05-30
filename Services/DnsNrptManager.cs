@@ -58,6 +58,81 @@ public class DnsNrptManager
         return rules;
     }
 
+    public List<InterfaceDnsInfo> GetInterfaceDnsServers()
+    {
+        var list = new List<InterfaceDnsInfo>();
+
+        string script =
+            "Get-DnsClientServerAddress | " +
+            "Select-Object InterfaceAlias, InterfaceIndex, AddressFamily, @{Name='ServerAddresses';Expression={[string]::Join(',', $_.ServerAddresses)}} | " +
+            "ConvertTo-Csv -NoTypeInformation";
+
+        string error;
+        string output = RunPowerShell(script, out error);
+
+        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+            return list;
+
+        var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length < 2) return list;
+
+        string[] headers = ParseCsvLine(lines[0]);
+        int idxAlias = Array.IndexOf(headers, "InterfaceAlias");
+        int idxIndex = Array.IndexOf(headers, "InterfaceIndex");
+        int idxFamily = Array.IndexOf(headers, "AddressFamily");
+        int idxServers = Array.IndexOf(headers, "ServerAddresses");
+
+        for (int i = 1; i < lines.Length; i++)
+        {
+            string[] values = ParseCsvLine(lines[i]);
+            if (values.Length < 2) continue;
+
+            string alias = idxAlias >= 0 && idxAlias < values.Length ? values[idxAlias] : "";
+            if (string.IsNullOrEmpty(alias)) continue;
+
+            string family = idxFamily >= 0 && idxFamily < values.Length ? values[idxFamily] : "";
+            if (family == "2") family = "IPv4";
+            else if (family == "23") family = "IPv6";
+
+            string servers = idxServers >= 0 && idxServers < values.Length ? values[idxServers] : "";
+
+            list.Add(new InterfaceDnsInfo
+            {
+                InterfaceAlias = alias,
+                InterfaceIndex = idxIndex >= 0 && idxIndex < values.Length ? values[idxIndex] : "",
+                AddressFamily = family,
+                ServerAddresses = servers
+            });
+        }
+
+        return list;
+    }
+
+    public DnsResult SetInterfaceDns(string alias, string family, string servers)
+    {
+        var familyArg = family == "IPv6" ? "IPv6" : "IPv4";
+        var sb = new StringBuilder();
+
+        if (string.IsNullOrWhiteSpace(servers))
+        {
+            sb.Append($"Set-DnsClientServerAddress -InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(alias)}' -Family {familyArg} -ResetServerAddresses");
+        }
+        else
+        {
+            var serverParts = servers.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var escapedServers = serverParts.Select(p => $"'{ProcessRunner.EscapePsSingleQuoted(p)}'").ToList();
+            sb.Append($"Set-DnsClientServerAddress -InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(alias)}' -Family {familyArg} -ServerAddresses {string.Join(",", escapedServers)}");
+        }
+
+        string error;
+        RunPowerShell(sb.ToString(), out error);
+
+        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+            return new DnsResult { Success = false, Message = TranslateError(error.Trim()) };
+
+        return new DnsResult { Success = true };
+    }
+
     public DnsResult AddRule(string ns, string dnsServers, string? comment = null)
     {
         if (string.IsNullOrWhiteSpace(ns))
@@ -181,7 +256,15 @@ public class DnsNrptManager
             char c = line[i];
             if (c == '"')
             {
-                inQuotes = !inQuotes;
+                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    sb.Append('"');
+                    i++;
+                }
+                else
+                {
+                    inQuotes = !inQuotes;
+                }
             }
             else if (c == ',' && !inQuotes)
             {

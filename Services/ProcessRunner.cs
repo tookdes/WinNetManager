@@ -116,6 +116,7 @@ public static class ProcessRunner
         string wrapped =
             "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
             "$OutputEncoding = [System.Text.Encoding]::UTF8; " +
+            "$ProgressPreference = 'SilentlyContinue'; " +
             script;
 
         byte[] bytes = Encoding.Unicode.GetBytes(wrapped);
