@@ -236,12 +236,12 @@ public static class NetworkHealthService
         }
         catch { }
 
-        // LSP / Winsock providers — 白名单过滤系统标准组件
-        var systemProviders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        // LSP / Winsock providers — 用子串匹配过滤系统标准组件（注册表值格式可能是 "MSAFD Tcpip [TCP/IP]" 而非纯 "Tcpip"）
+        var systemKeywords = new[]
         {
-            "tcp", "udp", "irda", "vmbus", "Psched", "afunix", "RFCOMM",
-            "mswsock", "rsvpsp", "nwlnkipx", "nwlnkflt", "pnrpnamedpipes",
-            "pnrp2tcp", "pnrp2ipx", "nrpsp"
+            "tcp", "udp", "irda", "vmbus", "psched", "afunix", "rfcomm",
+            "mswsock", "rsvpsp", "nwlnkipx", "nwlnkflt", "pnrp",
+            "msafd", "mstcp", "tcpip", "tcpip6", "蓝牙", "bluetooth"
         };
         try
         {
@@ -251,7 +251,11 @@ public static class NetworkHealthService
                 var providers = key.GetValue("Transports") as string[];
                 if (providers != null && providers.Length > 0)
                 {
-                    var nonStandard = providers.Where(p => !systemProviders.Contains(p.Trim())).ToList();
+                    var nonStandard = providers.Where(p =>
+                    {
+                        var t = p.Trim().ToLowerInvariant();
+                        return !systemKeywords.Any(k => t.Contains(k));
+                    }).ToList();
                     if (nonStandard.Count > 0)
                     {
                         items.Add(new NetworkHealthItem
@@ -282,11 +286,12 @@ public static class NetworkHealthService
             string? proxyOverride = key.GetValue("ProxyOverride") as string;
             string? autoConfigUrl = key.GetValue("AutoConfigURL") as string;
 
-            // WinHTTP proxy
+            // WinHTTP proxy — netsh 输出系统区域编码(OEM)，直接 Run 用 UTF-8 读会乱码，
+            // 改用 RunPowerShell 让 PS 把子进程输出重新编码为 UTF-8
             string? winHttpProxy = null;
             try
             {
-                string output = ProcessRunner.Run("netsh", "winhttp show proxy", out _, 5000);
+                string output = ProcessRunner.RunPowerShell("netsh winhttp show proxy", out _, 5000);
                 if (!string.IsNullOrWhiteSpace(output))
                     winHttpProxy = output.Trim();
             }
@@ -400,22 +405,46 @@ public static class NetworkHealthService
 
     private static void CollectFirewall(List<NetworkHealthItem> items)
     {
+        // 用 Get-NetFirewallProfile 替代 netsh advfirewall，避免区域设置导致的输出格式差异
         try
         {
-            string output = ProcessRunner.Run("netsh", "advfirewall show allprofiles state", out _, 5000);
-            if (!string.IsNullOrWhiteSpace(output))
+            string output = ProcessRunner.RunPowerShell(
+                "Get-NetFirewallProfile -ErrorAction SilentlyContinue | " +
+                "Select-Object Name, Enabled | ConvertTo-Csv -NoTypeInformation",
+                out _, 8000);
+            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length < 2) return;
+
+            string[] headers = ParseCsvLine(lines[0]);
+            int idxName = Array.IndexOf(headers, "Name");
+            int idxEnabled = Array.IndexOf(headers, "Enabled");
+
+            var profiles = new List<(string name, bool enabled)>();
+            for (int i = 1; i < lines.Length; i++)
             {
-                bool allOn = output.Contains("ON") || output.Contains("启用");
-                bool anyOff = output.Contains("OFF") || output.Contains("关闭");
-                items.Add(new NetworkHealthItem
-                {
-                    Category = "防火墙",
-                    Name = "Windows Defender 防火墙",
-                    Status = anyOff ? "部分配置文件已关闭" : (allOn ? "所有配置文件已启用" : "未知"),
-                    Detail = anyOff ? "至少一个配置文件（域/专用/公用）的防火墙已关闭。" : "",
-                    Risk = anyOff ? "Warn" : "None"
-                });
+                string[] values = ParseCsvLine(lines[i]);
+                if (values.Length < 2) continue;
+                string name = idxName >= 0 && idxName < values.Length ? values[idxName] : "";
+                string enabledStr = idxEnabled >= 0 && idxEnabled < values.Length ? values[idxEnabled] : "";
+                bool enabled = enabledStr.Equals("True", StringComparison.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(name))
+                    profiles.Add((name, enabled));
             }
+
+            if (profiles.Count == 0) return;
+
+            bool allOn = profiles.All(p => p.enabled);
+            bool anyOff = profiles.Any(p => !p.enabled);
+            string profileList = string.Join("、", profiles.Select(p => $"{p.name}({(p.enabled ? "开" : "关")})"));
+
+            items.Add(new NetworkHealthItem
+            {
+                Category = "防火墙",
+                Name = "Windows Defender 防火墙",
+                Status = anyOff ? "部分配置文件已关闭" : "所有配置文件已启用",
+                Detail = profileList,
+                Risk = anyOff ? "Warn" : "None"
+            });
         }
         catch { }
     }
