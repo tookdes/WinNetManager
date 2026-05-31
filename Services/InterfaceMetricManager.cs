@@ -93,13 +93,15 @@ public class InterfaceMetricManager
     public static string GetSetMetricCommandPreview(string interfaceAlias, string addressFamily, int metric)
     {
         string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
-        return $"Set-NetIPInterface -InterfaceAlias '{interfaceAlias}' -AddressFamily {family} -InterfaceMetric {metric}";
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(interfaceAlias);
+        return $"Set-NetIPInterface -InterfaceAlias '{safeAlias}' -AddressFamily {family} -InterfaceMetric {metric}";
     }
 
     public static string GetSetAutoMetricCommandPreview(string interfaceAlias, string addressFamily)
     {
         string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
-        return $"Set-NetIPInterface -InterfaceAlias '{interfaceAlias}' -AddressFamily {family} -AutomaticMetric $true";
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(interfaceAlias);
+        return $"Set-NetIPInterface -InterfaceAlias '{safeAlias}' -AddressFamily {family} -AutomaticMetric $true";
     }
 
     public List<GatewayMetricInfo> GetGatewayMetrics()
@@ -151,17 +153,21 @@ public class InterfaceMetricManager
     public MetricResult SetGatewayMetric(string interfaceAlias, string addressFamily, string nextHop, int metric)
     {
         string prefix = addressFamily == "IPv6" ? "::/0" : "0.0.0.0/0";
+        string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
         string safeAlias = ProcessRunner.EscapePsSingleQuoted(interfaceAlias);
         string safeHop = ProcessRunner.EscapePsSingleQuoted(nextHop);
 
-        string script = $"Set-NetRoute -DestinationPrefix '{prefix}' -InterfaceAlias '{safeAlias}' -NextHop '{safeHop}' -RouteMetric {metric}";
+        string script = $"Set-NetRoute -AddressFamily {family} -DestinationPrefix '{prefix}' -InterfaceAlias '{safeAlias}' -NextHop '{safeHop}' -RouteMetric {metric}";
         return ExecutePowerShell(script);
     }
 
     public static string GetSetGatewayMetricCommandPreview(string interfaceAlias, string addressFamily, string nextHop, int metric)
     {
         string prefix = addressFamily == "IPv6" ? "::/0" : "0.0.0.0/0";
-        return $"Set-NetRoute -DestinationPrefix '{prefix}' -InterfaceAlias '{interfaceAlias}' -NextHop '{nextHop}' -RouteMetric {metric}";
+        string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(interfaceAlias);
+        string safeHop = ProcessRunner.EscapePsSingleQuoted(nextHop);
+        return $"Set-NetRoute -AddressFamily {family} -DestinationPrefix '{prefix}' -InterfaceAlias '{safeAlias}' -NextHop '{safeHop}' -RouteMetric {metric}";
     }
 
     private static MetricResult ExecutePowerShell(string script)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net;
 using System.Text;
 using WinNetManager.Models;
 
@@ -111,21 +112,42 @@ public class DnsNrptManager
     public DnsResult SetInterfaceDns(string alias, string family, string servers)
     {
         var familyArg = family == "IPv6" ? "IPv6" : "IPv4";
-        var sb = new StringBuilder();
+        var safeAlias = ProcessRunner.EscapePsSingleQuoted(alias);
+        var targetObject = $"Get-DnsClientServerAddress -InterfaceAlias '{safeAlias}' -AddressFamily {familyArg}";
 
         if (string.IsNullOrWhiteSpace(servers))
         {
-            sb.Append($"Set-DnsClientServerAddress -InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(alias)}' -Family {familyArg} -ResetServerAddresses");
-        }
-        else
-        {
-            var serverParts = servers.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var escapedServers = serverParts.Select(p => $"'{ProcessRunner.EscapePsSingleQuoted(p)}'").ToList();
-            sb.Append($"Set-DnsClientServerAddress -InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(alias)}' -Family {familyArg} -ServerAddresses {string.Join(",", escapedServers)}");
+            string resetScript = $"{targetObject} | Set-DnsClientServerAddress -ResetServerAddresses";
+            return ExecuteDnsPowerShell(resetScript);
         }
 
+        var serverParts = servers.Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (serverParts.Length == 0)
+            return new DnsResult { Success = false, Message = "至少输入一个 DNS 服务器地址。" };
+
+        var escapedServers = new List<string>();
+        foreach (var part in serverParts)
+        {
+            if (!IPAddress.TryParse(part, out var ip))
+                return new DnsResult { Success = false, Message = $"无效的 DNS 服务器地址：{part}" };
+
+            bool familyMatches = familyArg == "IPv6"
+                ? ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+                : ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
+            if (!familyMatches)
+                return new DnsResult { Success = false, Message = $"DNS 服务器地址与地址族 {familyArg} 不匹配：{part}" };
+
+            escapedServers.Add($"'{ProcessRunner.EscapePsSingleQuoted(part)}'");
+        }
+
+        string script = $"{targetObject} | Set-DnsClientServerAddress -ServerAddresses {string.Join(",", escapedServers)}";
+        return ExecuteDnsPowerShell(script);
+    }
+
+    private static DnsResult ExecuteDnsPowerShell(string script)
+    {
         string error;
-        RunPowerShell(sb.ToString(), out error);
+        RunPowerShell(script, out error);
 
         if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
             return new DnsResult { Success = false, Message = TranslateError(error.Trim()) };

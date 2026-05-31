@@ -56,7 +56,7 @@ public partial class DhcpTab : UserControl
     private void BtnReleaseRenew6_Click(object sender, RoutedEventArgs e) =>
         DoReleaseRenew(ipv6: true);
 
-    private void BtnRestartAdapter_Click(object sender, RoutedEventArgs e)
+    private async void BtnRestartAdapter_Click(object sender, RoutedEventArgs e)
     {
         var selected = GetSelected();
         if (selected.Count == 0)
@@ -75,14 +75,21 @@ public partial class DhcpTab : UserControl
 
         if (result != MessageBoxResult.Yes) return;
 
-        var successful = new List<NetworkAdapterInfo>();
-        var errors = new List<string>();
-        foreach (var adapter in selected)
+        SetStatus($"Submitting restart for {selected.Count} adapter(s)...");
+        var restartResult = await Task.Run(() =>
         {
-            var res = _manager.RestartAdapter(adapter.Name);
-            if (res.Success) successful.Add(adapter);
-            else errors.Add($"{adapter.Name}: {res.Message}");
-        }
+            var successful = new List<NetworkAdapterInfo>();
+            var errors = new List<string>();
+            foreach (var adapter in selected)
+            {
+                var res = _manager.RestartAdapter(adapter.Name);
+                if (res.Success) successful.Add(adapter);
+                else errors.Add($"{adapter.Name}: {res.Message}");
+            }
+            return (successful, errors);
+        });
+        var successful = restartResult.successful;
+        var errors = restartResult.errors;
 
         if (successful.Count > 0)
         {
@@ -101,7 +108,7 @@ public partial class DhcpTab : UserControl
         }
     }
 
-    private void DoReleaseRenew(bool ipv6)
+    private async void DoReleaseRenew(bool ipv6)
     {
         var selected = GetSelected();
         if (selected.Count == 0)
@@ -121,14 +128,21 @@ public partial class DhcpTab : UserControl
 
         if (result != MessageBoxResult.Yes) return;
 
-        var successful = new List<NetworkAdapterInfo>();
-        var errors = new List<string>();
-        foreach (var adapter in selected)
+        SetStatus($"Submitting {proto} Release+Renew for {selected.Count} adapter(s)...");
+        var releaseResult = await Task.Run(() =>
         {
-            var res = _manager.ReleaseRenew(adapter.Name, ipv6);
-            if (res.Success) successful.Add(adapter);
-            else errors.Add($"{adapter.Name}: {res.Message}");
-        }
+            var successful = new List<NetworkAdapterInfo>();
+            var errors = new List<string>();
+            foreach (var adapter in selected)
+            {
+                var res = _manager.ReleaseRenew(adapter.Name, ipv6);
+                if (res.Success) successful.Add(adapter);
+                else errors.Add($"{adapter.Name}: {res.Message}");
+            }
+            return (successful, errors);
+        });
+        var successful = releaseResult.successful;
+        var errors = releaseResult.errors;
 
         // 无论是否全部成功，成功的网卡都触发自动刷新并显示命令预览
         if (successful.Count > 0)
