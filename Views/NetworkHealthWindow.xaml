@@ -1,0 +1,68 @@
+<Window x:Class="WinNetManager.Views.NetworkHealthWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="网络健康扫描结果" Height="620" Width="920"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        KeyDown="Window_KeyDown">
+    <DockPanel Margin="10">
+        <!-- 顶部摘要 + 工具栏 -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                <TextBlock x:Name="TbkSummary" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <ComboBox x:Name="CmbRisk" Width="80" Padding="2,2" Margin="0,0,8,0"
+                          VerticalContentAlignment="Center" SelectionChanged="CmbRisk_SelectionChanged">
+                    <ComboBoxItem Content="全部" Tag="" IsSelected="True"/>
+                    <ComboBoxItem Content="危险" Tag="Danger"/>
+                    <ComboBoxItem Content="警告" Tag="Warn"/>
+                    <ComboBoxItem Content="提示" Tag="Info"/>
+                    <ComboBoxItem Content="正常" Tag="None"/>
+                </ComboBox>
+                <TextBox x:Name="TxtFilter" Width="140" Padding="4,2" Margin="0,0,4,0"
+                         TextChanged="TxtFilter_TextChanged" ToolTip="按类别/名称/详情筛选"/>
+                <Button Content="清除" Padding="8,3" Click="BtnClearFilter_Click"/>
+                <Button Content="复制全部" Padding="8,3" Margin="8,0,0,0" Click="BtnCopyAll_Click"/>
+                <Button Content="关闭" Padding="12,3" Margin="4,0,0,0" Click="BtnClose_Click"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- 说明 -->
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
+                   Text="扫描常见的网络干扰源和异常配置。结果仅供参考，不代表一定有问题，需结合实际场景判断。"/>
+
+        <!-- 结果表格 -->
+        <DataGrid x:Name="ResultGrid"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  SelectionMode="Extended"
+                  GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column"
+                  AlternatingRowBackground="#F8F8F8"
+                  ColumnWidth="Auto">
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding Risk}" Value="Danger">
+                            <Setter Property="Background" Value="#FDECEC"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding Risk}" Value="Warn">
+                            <Setter Property="Background" Value="#FFF6E0"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding Risk}" Value="Info">
+                            <Setter Property="Background" Value="#EBF5FB"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+                <DataGridTextColumn Binding="{Binding Category}" Header="类别" Width="130"/>
+                <DataGridTextColumn Binding="{Binding Name}" Header="项目" Width="180"/>
+                <DataGridTextColumn Binding="{Binding Status}" Header="状态" Width="120"/>
+                <DataGridTextColumn Binding="{Binding RiskDisplay}" Header="风险" Width="50"/>
+                <DataGridTextColumn Binding="{Binding Detail}" Header="详情" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</Window>

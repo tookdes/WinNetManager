@@ -172,6 +172,42 @@ public partial class NetworkDiagTab : UserControl
         }
     }
 
+    private async void BtnHealthScan_Click(object sender, RoutedEventArgs e)
+    {
+        var btn = sender as Button;
+        if (btn != null) btn.IsEnabled = false;
+
+        SetStatus("正在扫描网络健康状态...");
+        BtnRefresh.IsEnabled = false;
+
+        List<NetworkHealthItem> items;
+        try
+        {
+            items = await System.Threading.Tasks.Task.Run(() => NetworkHealthService.GetSnapshot());
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"扫描失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            SetStatus("扫描失败");
+            return;
+        }
+        finally
+        {
+            BtnRefresh.IsEnabled = true;
+            if (btn != null) btn.IsEnabled = true;
+        }
+
+        var dlg = new NetworkHealthWindow(items)
+        {
+            Owner = Window.GetWindow(this)
+        };
+        dlg.ShowDialog();
+
+        int danger = items.Count(i => i.Risk == "Danger");
+        int warn = items.Count(i => i.Risk == "Warn");
+        SetStatus($"扫描完成：共 {items.Count} 项，危险 {danger}，警告 {warn}");
+    }
+
     private void MenuCopy_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.CopySelectedCellValue(ConnectionGrid);
 

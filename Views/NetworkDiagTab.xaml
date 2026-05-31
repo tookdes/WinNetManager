@@ -3,11 +3,14 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <DockPanel Margin="8">
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-            <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
+            <Button Content="刷新" x:Name="BtnRefresh" Padding="12,4" Click="BtnRefresh_Click"/>
             <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
             <Button Content="端口测试" Padding="12,4" Margin="6,0,0,0" Click="BtnPortTest_Click"/>
             <Button Content="Tracert" Padding="12,4" Margin="6,0,0,0" Click="BtnTracert_Click"/>
             <Button Content="Pathping" Padding="12,4" Margin="6,0,0,0" Click="BtnPathping_Click"/>
+            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Button Content="网络健康扫描" Padding="12,4" Margin="6,0,0,0" Click="BtnHealthScan_Click"
+                    ToolTip="扫描常见的网络干扰源和异常配置（WinDivert/TUN/代理/PAC/VPN/WFP 等）"/>
         </StackPanel>
 
         <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
