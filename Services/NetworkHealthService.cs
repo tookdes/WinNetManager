@@ -365,8 +365,8 @@ public static class NetworkHealthService
         // Rasdial VPN connections
         try
         {
-            string output = ProcessRunner.Run("powershell.exe",
-                "-NoProfile -Command \"Get-VpnConnection -ErrorAction SilentlyContinue | Select-Object Name, SplitTunneling, ConnectionStatus | ConvertTo-Csv -NoTypeInformation\"",
+            string output = ProcessRunner.RunPowerShell(
+                "Get-VpnConnection -ErrorAction SilentlyContinue | Select-Object Name, SplitTunneling, ConnectionStatus | ConvertTo-Csv -NoTypeInformation",
                 out _, 10000);
             var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length >= 2)
@@ -470,8 +470,8 @@ public static class NetworkHealthService
         // NRPT rules
         try
         {
-            string output = ProcessRunner.Run("powershell.exe",
-                "-NoProfile -Command \"Get-DnsClientNrptRule -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count\"",
+            string output = ProcessRunner.RunPowerShell(
+                "Get-DnsClientNrptRule -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count",
                 out _, 10000);
             if (int.TryParse(output.Trim(), out int count) && count > 0)
             {
@@ -565,8 +565,9 @@ public static class NetworkHealthService
     {
         try
         {
-            string output = ProcessRunner.Run("powershell.exe",
-                $"-NoProfile -Command \"Get-Service -Name '{serviceName}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name\"",
+            string safeName = ProcessRunner.EscapePsSingleQuoted(serviceName);
+            string output = ProcessRunner.RunPowerShell(
+                $"Get-Service -Name '{safeName}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name",
                 out _, 5000);
             return output.Trim().Equals(serviceName, StringComparison.OrdinalIgnoreCase);
         }
@@ -577,8 +578,9 @@ public static class NetworkHealthService
     {
         try
         {
-            string output = ProcessRunner.Run("powershell.exe",
-                $"-NoProfile -Command \"Get-Service -Name '{serviceName}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status\"",
+            string safeName = ProcessRunner.EscapePsSingleQuoted(serviceName);
+            string output = ProcessRunner.RunPowerShell(
+                $"Get-Service -Name '{safeName}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status",
                 out _, 5000);
             return output.Trim().Equals("Running", StringComparison.OrdinalIgnoreCase);
         }
@@ -590,8 +592,8 @@ public static class NetworkHealthService
         var names = new List<string>();
         try
         {
-            string output = ProcessRunner.Run("powershell.exe",
-                "-NoProfile -Command \"Get-NetAdapter -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name\"",
+            string output = ProcessRunner.RunPowerShell(
+                "Get-NetAdapter -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name",
                 out _, 8000);
             foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
             {

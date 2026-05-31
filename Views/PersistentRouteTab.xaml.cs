@@ -433,7 +433,7 @@ public partial class PersistentRouteTab : UserControl
             Filter = "JSON 文件 (*.json)|*.json",
         };
 
-        if (dlg.ShowDialog() != true) return;
+        if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
 
         try
         {
@@ -462,7 +462,7 @@ public partial class PersistentRouteTab : UserControl
             Filter = "JSON 文件 (*.json)|*.json|所有文件 (*.*)|*.*",
         };
 
-        if (dlg.ShowDialog() != true) return;
+        if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
 
         try
         {
