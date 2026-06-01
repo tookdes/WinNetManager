@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -23,7 +24,29 @@ public partial class PersistentRouteTab : UserControl
     {
         InitializeComponent();
         _manager = new RoutingManager();
-        Loaded += (_, _) => LoadRoutes();
+        Loaded += async (_, _) => await LoadRoutesAsync();
+    }
+
+    private async Task LoadRoutesAsync()
+    {
+        try
+        {
+            var routes = await Task.Run(() => _manager.GetPersistentRoutes());
+            _allRoutes = routes;
+            _originalSnapshots.Clear();
+            foreach (var route in _allRoutes)
+                _originalSnapshots[route] = route.Clone();
+
+            _routeView = CollectionViewSource.GetDefaultView(_allRoutes);
+            _routeView.Filter = RouteFilter;
+            RoutesGrid.ItemsSource = _routeView;
+            UpdateCount();
+            EmptyState.Visibility = _allRoutes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"加载路由失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void LoadRoutes()
@@ -90,7 +113,7 @@ public partial class PersistentRouteTab : UserControl
 
     // --- 按钮事件 ---
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => LoadRoutes();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await LoadRoutesAsync();
 
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => RoutesGrid.SelectAll();
 
@@ -186,7 +209,7 @@ public partial class PersistentRouteTab : UserControl
         UpdateCount();
     }
 
-    private void BtnCancelChanges_Click(object sender, RoutedEventArgs e)
+    private async void BtnCancelChanges_Click(object sender, RoutedEventArgs e)
     {
         var pending = _allRoutes?.Count(r => r.Status != ChangeStatus.Unchanged) ?? 0;
         if (pending == 0) return;
@@ -198,10 +221,10 @@ public partial class PersistentRouteTab : UserControl
             MessageBoxImage.Question);
 
         if (result == MessageBoxResult.Yes)
-            LoadRoutes();
+            await LoadRoutesAsync();
     }
 
-    private void BtnApply_Click(object sender, RoutedEventArgs e)
+    private async void BtnApply_Click(object sender, RoutedEventArgs e)
     {
         var toDelete = _allRoutes.Where(r => r.Status == ChangeStatus.Deleted).ToList();
         var toModify = _allRoutes.Where(r => r.Status == ChangeStatus.Modified).ToList();
@@ -246,60 +269,65 @@ public partial class PersistentRouteTab : UserControl
         var confirm = MessageBox.Show(sb.ToString(), "确认应用更改", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (confirm != MessageBoxResult.Yes) return;
 
-        var errors = new List<string>();
-        var successes = new List<string>();
-
-        foreach (var route in toDelete)
+        var (successes, errors) = await Task.Run(() =>
         {
-            var original = _originalSnapshots.GetValueOrDefault(route);
-            if (original == null)
-            {
-                errors.Add($"删除 {route.DestinationDisplay}：找不到原始快照");
-                continue;
-            }
-            var res = _manager.DeleteRoute(original);
-            if (res.Success)
-                successes.Add($"删除 {route.DestinationDisplay}");
-            else
-                errors.Add($"删除 {route.DestinationDisplay} 失败: {res.Message}");
-        }
+            var errs = new List<string>();
+            var oks = new List<string>();
 
-        foreach (var route in toModify)
-        {
-            var original = _originalSnapshots.GetValueOrDefault(route);
-            if (original == null)
+            foreach (var route in toDelete)
             {
-                errors.Add($"修改 {route.DestinationDisplay}：找不到原始快照");
-                continue;
+                var original = _originalSnapshots.GetValueOrDefault(route);
+                if (original == null)
+                {
+                    errs.Add($"删除 {route.DestinationDisplay}：找不到原始快照");
+                    continue;
+                }
+                var res = _manager.DeleteRoute(original);
+                if (res.Success)
+                    oks.Add($"删除 {route.DestinationDisplay}");
+                else
+                    errs.Add($"删除 {route.DestinationDisplay} 失败: {res.Message}");
             }
-            var delRes = _manager.DeleteRoute(original);
-            if (!delRes.Success)
-            {
-                errors.Add($"修改 {route.DestinationDisplay}: 无法删除原路由 - {delRes.Message}");
-                continue;
-            }
-            var addRes = _manager.AddRoute(route);
-            if (addRes.Success)
-            {
-                successes.Add($"修改 {route.DestinationDisplay}");
-            }
-            else
-            {
-                errors.Add($"修改 {route.DestinationDisplay}: 无法添加新路由 - {addRes.Message}");
-                var restoreRes = _manager.AddRoute(original);
-                if (!restoreRes.Success)
-                    errors.Add($"  ⚠ 恢复原始路由也失败: {restoreRes.Message}");
-            }
-        }
 
-        foreach (var route in toAdd)
-        {
-            var res = _manager.AddRoute(route);
-            if (res.Success)
-                successes.Add($"新增 {route.DestinationDisplay}");
-            else
-                errors.Add($"新增 {route.DestinationDisplay} 失败: {res.Message}");
-        }
+            foreach (var route in toModify)
+            {
+                var original = _originalSnapshots.GetValueOrDefault(route);
+                if (original == null)
+                {
+                    errs.Add($"修改 {route.DestinationDisplay}：找不到原始快照");
+                    continue;
+                }
+                var delRes = _manager.DeleteRoute(original);
+                if (!delRes.Success)
+                {
+                    errs.Add($"修改 {route.DestinationDisplay}: 无法删除原路由 - {delRes.Message}");
+                    continue;
+                }
+                var addRes = _manager.AddRoute(route);
+                if (addRes.Success)
+                {
+                    oks.Add($"修改 {route.DestinationDisplay}");
+                }
+                else
+                {
+                    errs.Add($"修改 {route.DestinationDisplay}: 无法添加新路由 - {addRes.Message}");
+                    var restoreRes = _manager.AddRoute(original);
+                    if (!restoreRes.Success)
+                        errs.Add($"  ⚠ 恢复原始路由也失败: {restoreRes.Message}");
+                }
+            }
+
+            foreach (var route in toAdd)
+            {
+                var res = _manager.AddRoute(route);
+                if (res.Success)
+                    oks.Add($"新增 {route.DestinationDisplay}");
+                else
+                    errs.Add($"新增 {route.DestinationDisplay} 失败: {res.Message}");
+            }
+
+            return (oks, errs);
+        });
 
         ShowApplyResult(successes, errors);
 
@@ -326,7 +354,7 @@ public partial class PersistentRouteTab : UserControl
         if (cmdPreview.Length > 0 && Window.GetWindow(this) is MainWindow mw)
             mw.SetCommandPreview(cmdPreview.ToString().Trim());
 
-        LoadRoutes();
+        await LoadRoutesAsync();
     }
 
     private static string GetRouteCommand(RouteEntry route, bool isDelete)
@@ -423,7 +451,7 @@ public partial class PersistentRouteTab : UserControl
 
     // --- 导入导出 ---
 
-    private void BtnExport_Click(object sender, RoutedEventArgs e)
+    private async void BtnExport_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.SaveFileDialog
         {
@@ -437,7 +465,7 @@ public partial class PersistentRouteTab : UserControl
 
         try
         {
-            var currentRoutes = _manager.GetPersistentRoutes();
+            var currentRoutes = await Task.Run(() => _manager.GetPersistentRoutes());
             var config = new WinNetConfig
             {
                 PersistentRoutes = ConfigExportService.ToRouteConfigs(currentRoutes),
@@ -454,7 +482,7 @@ public partial class PersistentRouteTab : UserControl
         }
     }
 
-    private void BtnImport_Click(object sender, RoutedEventArgs e)
+    private async void BtnImport_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
@@ -475,7 +503,7 @@ public partial class PersistentRouteTab : UserControl
                 return;
             }
 
-            LoadRoutes();
+            await LoadRoutesAsync();
 
             var toAdd = new List<RouteEntry>();
             var toModify = new List<(RouteEntry Existing, RouteEntry New)>();
@@ -580,7 +608,7 @@ public partial class PersistentRouteTab : UserControl
 
     // --- 路由测试 ---
 
-    private void BtnRouteTest_Click(object sender, RoutedEventArgs e)
+    private async void BtnRouteTest_Click(object sender, RoutedEventArgs e)
     {
         string target = TxtTestTarget.Text?.Trim() ?? "";
         if (string.IsNullOrEmpty(target))
@@ -593,111 +621,112 @@ public partial class PersistentRouteTab : UserControl
 
         try
         {
-            var sb = new StringBuilder();
-
-            // 1. 解析域名
-            string ip = target;
-            if (!System.Net.IPAddress.TryParse(target, out _))
+            var result = await Task.Run(() =>
             {
-                try
+                var sb = new StringBuilder();
+
+                // 1. 解析域名
+                string ip = target;
+                if (!System.Net.IPAddress.TryParse(target, out _))
                 {
-                    var addresses = System.Net.Dns.GetHostAddresses(target);
-                    if (addresses.Length == 0)
+                    try
                     {
-                        TxtTestResult.Text = $"无法解析域名：{target}";
-                        return;
+                        var addresses = System.Net.Dns.GetHostAddresses(target);
+                        if (addresses.Length == 0)
+                            return $"无法解析域名：{target}";
+                        ip = addresses[0].ToString();
+                        sb.AppendLine($"域名解析：{target} -> {ip}");
+                        sb.AppendLine();
                     }
-                    ip = addresses[0].ToString();
-                    sb.AppendLine($"域名解析：{target} -> {ip}");
-                    sb.AppendLine();
-                }
-                catch
-                {
-                    TxtTestResult.Text = $"无法解析域名：{target}";
-                    return;
-                }
-            }
-
-            // 2. 查找匹配路由
-            string routeScript =
-                $"Find-NetRoute -RemoteIPAddress '{ProcessRunner.EscapePsSingleQuoted(ip)}' | " +
-                "Select-Object InterfaceAlias, InterfaceIndex, NextHop, RouteMetric | " +
-                "ConvertTo-Csv -NoTypeInformation";
-            string routeError;
-            string routeOutput = RunPowerShell(routeScript, out routeError, 15000);
-
-            if (!string.IsNullOrEmpty(routeError) && !routeError.Contains("警告"))
-            {
-                sb.AppendLine($"路由查询失败：{routeError.Trim()}");
-            }
-            else
-            {
-                var lines = routeOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                if (lines.Length >= 2)
-                {
-                    string[] headers = ParseCsvLine(lines[0]);
-                    int idxAlias = Array.IndexOf(headers, "InterfaceAlias");
-                    int idxIdx = Array.IndexOf(headers, "InterfaceIndex");
-                    int idxHop = Array.IndexOf(headers, "NextHop");
-                    int idxMetric = Array.IndexOf(headers, "RouteMetric");
-
-                    for (int i = 1; i < lines.Length; i++)
+                    catch
                     {
-                        string[] values = ParseCsvLine(lines[i]);
-                        if (values.Length < 2) continue;
-
-                        string alias = idxAlias >= 0 && idxAlias < values.Length ? values[idxAlias] : "";
-                        string idx = idxIdx >= 0 && idxIdx < values.Length ? values[idxIdx] : "";
-                        string hop = idxHop >= 0 && idxHop < values.Length ? values[idxHop] : "";
-                        string metric = idxMetric >= 0 && idxMetric < values.Length ? values[idxMetric] : "";
-
-                        sb.AppendLine($"匹配路由：接口={alias} (索引 {idx})  下一跳={hop}  度量={metric}");
+                        return $"无法解析域名：{target}";
                     }
+                }
+
+                // 2. 查找匹配路由
+                string routeScript =
+                    $"Find-NetRoute -RemoteIPAddress '{ProcessRunner.EscapePsSingleQuoted(ip)}' | " +
+                    "Select-Object InterfaceAlias, InterfaceIndex, NextHop, RouteMetric | " +
+                    "ConvertTo-Csv -NoTypeInformation";
+                string routeError;
+                string routeOutput = RunPowerShell(routeScript, out routeError, 15000);
+
+                if (!string.IsNullOrEmpty(routeError) && !routeError.Contains("警告"))
+                {
+                    sb.AppendLine($"路由查询失败：{routeError.Trim()}");
                 }
                 else
                 {
-                    sb.AppendLine("未找到匹配路由。");
-                }
-            }
-
-            sb.AppendLine();
-
-            // 3. Ping 测试
-            string pingScript = $"Test-Connection -ComputerName '{ProcessRunner.EscapePsSingleQuoted(ip)}' -Count 4 -ErrorAction SilentlyContinue | Select-Object ResponseTime | ConvertTo-Csv -NoTypeInformation";
-            string pingError;
-            string pingOutput = RunPowerShell(pingScript, out pingError, 20000);
-
-            if (!string.IsNullOrEmpty(pingError) && !pingError.Contains("警告"))
-            {
-                sb.AppendLine($"Ping 失败：{pingError.Trim()}");
-            }
-            else
-            {
-                var lines = pingOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                var latencies = new List<int>();
-                if (lines.Length >= 2)
-                {
-                    int idxLatency = Array.IndexOf(ParseCsvLine(lines[0]), "ResponseTime");
-                    for (int i = 1; i < lines.Length; i++)
+                    var lines = routeOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (lines.Length >= 2)
                     {
-                        string[] values = ParseCsvLine(lines[i]);
-                        if (idxLatency >= 0 && idxLatency < values.Length && int.TryParse(values[idxLatency], out int lat))
-                            latencies.Add(lat);
+                        string[] headers = ParseCsvLine(lines[0]);
+                        int idxAlias = Array.IndexOf(headers, "InterfaceAlias");
+                        int idxIdx = Array.IndexOf(headers, "InterfaceIndex");
+                        int idxHop = Array.IndexOf(headers, "NextHop");
+                        int idxMetric = Array.IndexOf(headers, "RouteMetric");
+
+                        for (int i = 1; i < lines.Length; i++)
+                        {
+                            string[] values = ParseCsvLine(lines[i]);
+                            if (values.Length < 2) continue;
+
+                            string alias = idxAlias >= 0 && idxAlias < values.Length ? values[idxAlias] : "";
+                            string idx = idxIdx >= 0 && idxIdx < values.Length ? values[idxIdx] : "";
+                            string hop = idxHop >= 0 && idxHop < values.Length ? values[idxHop] : "";
+                            string metric = idxMetric >= 0 && idxMetric < values.Length ? values[idxMetric] : "";
+
+                            sb.AppendLine($"匹配路由：接口={alias} (索引 {idx})  下一跳={hop}  度量={metric}");
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendLine("未找到匹配路由。");
                     }
                 }
 
-                if (latencies.Count > 0)
+                sb.AppendLine();
+
+                // 3. Ping 测试
+                string pingScript = $"Test-Connection -ComputerName '{ProcessRunner.EscapePsSingleQuoted(ip)}' -Count 4 -ErrorAction SilentlyContinue | Select-Object ResponseTime | ConvertTo-Csv -NoTypeInformation";
+                string pingError;
+                string pingOutput = RunPowerShell(pingScript, out pingError, 20000);
+
+                if (!string.IsNullOrEmpty(pingError) && !pingError.Contains("警告"))
                 {
-                    sb.AppendLine($"Ping 测试：发送 4，收到 {latencies.Count}");
-                    sb.AppendLine($"  延迟  最小={latencies.Min()}ms  平均={(int)latencies.Average()}ms  最大={latencies.Max()}ms");
+                    sb.AppendLine($"Ping 失败：{pingError.Trim()}");
                 }
                 else
                 {
-                    sb.AppendLine("Ping 无响应（目标不可达或被防火墙拦截）。");
-                }
-            }
+                    var lines = pingOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    var latencies = new List<int>();
+                    if (lines.Length >= 2)
+                    {
+                        int idxLatency = Array.IndexOf(ParseCsvLine(lines[0]), "ResponseTime");
+                        for (int i = 1; i < lines.Length; i++)
+                        {
+                            string[] values = ParseCsvLine(lines[i]);
+                            if (idxLatency >= 0 && idxLatency < values.Length && int.TryParse(values[idxLatency], out int lat))
+                                latencies.Add(lat);
+                        }
+                    }
 
-            TxtTestResult.Text = sb.ToString().Trim();
+                    if (latencies.Count > 0)
+                    {
+                        sb.AppendLine($"Ping 测试：发送 4，收到 {latencies.Count}");
+                        sb.AppendLine($"  延迟  最小={latencies.Min()}ms  平均={(int)latencies.Average()}ms  最大={latencies.Max()}ms");
+                    }
+                    else
+                    {
+                        sb.AppendLine("Ping 无响应（目标不可达或被防火墙拦截）。");
+                    }
+                }
+
+                return sb.ToString().Trim();
+            });
+
+            TxtTestResult.Text = result;
             SetStatus($"路由测试完成：{target}");
         }
         catch (Exception ex)

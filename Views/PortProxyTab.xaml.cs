@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -20,7 +21,31 @@ public partial class PortProxyTab : UserControl
     public PortProxyTab()
     {
         InitializeComponent();
-        Loaded += (_, _) => RefreshData();
+        Loaded += async (_, _) => await RefreshDataAsync();
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        try
+        {
+            var (rules, svcRunning) = await Task.Run(() =>
+            {
+                var r = _manager.GetRules();
+                bool s = _manager.IsServiceRunning();
+                return (r, s);
+            });
+            _allRules = rules;
+            _ruleView = CollectionViewSource.GetDefaultView(_allRules);
+            _ruleView.Filter = RuleFilter;
+            ProxyGrid.ItemsSource = _ruleView;
+            UpdateCount();
+            TbkServiceWarning.Visibility = svcRunning ? Visibility.Collapsed : Visibility.Visible;
+            EmptyState.Visibility = _allRules.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"加载端口转发规则失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void RefreshData()
@@ -82,14 +107,14 @@ public partial class PortProxyTab : UserControl
 
     // --- 按钮事件 ---
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshDataAsync();
 
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => ProxyGrid.SelectAll();
 
     private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.InvertSelection(ProxyGrid, _allRules);
 
-    private void BtnNew_Click(object sender, RoutedEventArgs e)
+    private async void BtnNew_Click(object sender, RoutedEventArgs e)
     {
         var editWindow = new PortProxyEditWindow(null);
         editWindow.Owner = Window.GetWindow(this);
@@ -97,10 +122,14 @@ public partial class PortProxyTab : UserControl
         if (editWindow.ShowDialog() == true)
         {
             var rule = editWindow.Rule;
-            var result = _manager.AddRule(rule);
+            var (result, fwRes) = await Task.Run(() =>
+            {
+                var r = _manager.AddRule(rule);
+                var f = r.Success ? _manager.AddFirewallRule(rule) : new PortProxyResult { Success = false };
+                return (r, f);
+            });
             if (result.Success)
             {
-                var fwRes = _manager.AddFirewallRule(rule);
                 string fwMsg = fwRes.Success ? "（防火墙规则已添加）" : $"（防火墙规则添加失败：{fwRes.Message}）";
                 SetStatus($"已添加端口转发：{rule.ListenAddress}:{rule.ListenPort} → {rule.ConnectAddress}:{rule.ConnectPort} {fwMsg}");
                 string fwName = PortProxyManager.GetFirewallRuleName(rule);
@@ -108,7 +137,7 @@ public partial class PortProxyTab : UserControl
                 if (fwRes.Success)
                     cmd += $"\nnetsh advfirewall firewall add rule name=\"{fwName}\" dir=in action=allow protocol={rule.Protocol} localport={rule.ListenPort}";
                 if (Window.GetWindow(this) is MainWindow mw) mw.SetCommandPreview(cmd);
-                RefreshData();
+                await RefreshDataAsync();
             }
             else
             {
@@ -117,7 +146,7 @@ public partial class PortProxyTab : UserControl
         }
     }
 
-    private void BtnEdit_Click(object sender, RoutedEventArgs e)
+    private async void BtnEdit_Click(object sender, RoutedEventArgs e)
     {
         var selected = GetSelected();
         if (selected.Count != 1)
@@ -134,20 +163,23 @@ public partial class PortProxyTab : UserControl
 
         var edited = editWindow.Rule;
 
-        // 如果键变了（方向/监听地址/监听端口），先删除旧规则再添加新规则
         var cmdPreview = new StringBuilder();
         if (!original.EqualsWithKeys(edited))
         {
             cmdPreview.AppendLine($"netsh interface portproxy delete {original.Direction} listenaddress=\"{original.ListenAddress}\" listenport=\"{original.ListenPort}\"");
             cmdPreview.AppendLine($"netsh advfirewall firewall delete rule name=\"{PortProxyManager.GetFirewallRuleName(original)}\"");
 
-            var delRes = _manager.DeleteRule(original);
+            var (delRes, delFwRes) = await Task.Run(() =>
+            {
+                var d = _manager.DeleteRule(original);
+                var f = _manager.DeleteFirewallRule(original);
+                return (d, f);
+            });
             if (!delRes.Success)
             {
                 MessageBox.Show($"删除原规则失败：{delRes.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
-            var delFwRes = _manager.DeleteFirewallRule(original);
             if (!delFwRes.Success && !delFwRes.Message.Contains("找不到"))
             {
                 MessageBox.Show($"原端口转发已删除，但旧防火墙规则删除失败：\n{delFwRes.Message}",
@@ -157,19 +189,26 @@ public partial class PortProxyTab : UserControl
             cmdPreview.AppendLine($"netsh interface portproxy add {edited.Direction} listenaddress=\"{edited.ListenAddress}\" listenport=\"{edited.ListenPort}\" connectaddress=\"{edited.ConnectAddress}\" connectport=\"{edited.ConnectPort}\" protocol=\"{edited.Protocol}\"");
             cmdPreview.AppendLine($"netsh advfirewall firewall add rule name=\"{PortProxyManager.GetFirewallRuleName(edited)}\" dir=in action=allow protocol={edited.Protocol} localport={edited.ListenPort}");
 
-            var addRes = _manager.AddRule(edited);
+            var (addRes, addFwRes) = await Task.Run(() =>
+            {
+                var a = _manager.AddRule(edited);
+                var f = a.Success ? _manager.AddFirewallRule(edited) : new PortProxyResult { Success = false };
+                return (a, f);
+            });
             if (addRes.Success)
             {
-                var fwRes = _manager.AddFirewallRule(edited);
-                string fwMsg = fwRes.Success ? "（防火墙规则已更新）" : $"（防火墙规则添加失败：{fwRes.Message}）";
+                string fwMsg = addFwRes.Success ? "（防火墙规则已更新）" : $"（防火墙规则添加失败：{addFwRes.Message}）";
                 SetStatus($"已修改端口转发：{edited.ListenAddress}:{edited.ListenPort} → {edited.ConnectAddress}:{edited.ConnectPort} {fwMsg}");
             }
             else
             {
                 MessageBox.Show($"添加新规则失败：{addRes.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                // 尝试恢复旧规则
-                var restoreRes = _manager.AddRule(original);
-                var restoreFw = _manager.AddFirewallRule(original);
+                var (restoreRes, restoreFw) = await Task.Run(() =>
+                {
+                    var r = _manager.AddRule(original);
+                    var f = _manager.AddFirewallRule(original);
+                    return (r, f);
+                });
                 if (!restoreRes.Success || !restoreFw.Success)
                 {
                     string details = $"旧规则恢复：{(restoreRes.Success ? "成功" : "失败")}，防火墙：{(restoreFw.Success ? "成功" : "失败")}";
@@ -183,10 +222,14 @@ public partial class PortProxyTab : UserControl
             cmdPreview.AppendLine($"netsh advfirewall firewall delete rule name=\"{PortProxyManager.GetFirewallRuleName(original)}\"");
             cmdPreview.AppendLine($"netsh advfirewall firewall add rule name=\"{PortProxyManager.GetFirewallRuleName(edited)}\" dir=in action=allow protocol={edited.Protocol} localport={edited.ListenPort}");
 
-            var setRes = _manager.SetRule(edited);
+            var (setRes, fwRes) = await Task.Run(() =>
+            {
+                var s = _manager.SetRule(edited);
+                var f = s.Success ? _manager.UpdateFirewallRule(original, edited) : new PortProxyResult { Success = false };
+                return (s, f);
+            });
             if (setRes.Success)
             {
-                var fwRes = _manager.UpdateFirewallRule(original, edited);
                 string fwMsg = fwRes.Success ? "（防火墙规则已更新）" : $"（防火墙规则更新失败：{fwRes.Message}）";
                 SetStatus($"已修改端口转发：{edited.ListenAddress}:{edited.ListenPort} → {edited.ConnectAddress}:{edited.ConnectPort} {fwMsg}");
             }
@@ -197,10 +240,10 @@ public partial class PortProxyTab : UserControl
         }
 
         if (Window.GetWindow(this) is MainWindow mw2) mw2.SetCommandPreview(cmdPreview.ToString().Trim());
-        RefreshData();
+        await RefreshDataAsync();
     }
 
-    private void BtnDelete_Click(object sender, RoutedEventArgs e)
+    private async void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
         var selected = GetSelected();
         if (selected.Count == 0)
@@ -214,18 +257,21 @@ public partial class PortProxyTab : UserControl
             "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        int ok = 0;
-        var errors = new List<string>();
-        foreach (var rule in selected)
+        var results = await Task.Run(() =>
         {
-            var res = _manager.DeleteRule(rule);
-            if (res.Success)
+            var list = new List<(PortProxyRule rule, PortProxyResult delRes)>();
+            foreach (var rule in selected)
             {
-                _manager.DeleteFirewallRule(rule);
-                ok++;
+                var res = _manager.DeleteRule(rule);
+                if (res.Success) _manager.DeleteFirewallRule(rule);
+                list.Add((rule, res));
             }
-            else errors.Add($"{rule.ListenAddress}:{rule.ListenPort} - {res.Message}");
-        }
+            return list;
+        });
+
+        int ok = results.Count(r => r.delRes.Success);
+        var errors = results.Where(r => !r.delRes.Success)
+            .Select(r => $"{r.rule.ListenAddress}:{r.rule.ListenPort} - {r.delRes.Message}").ToList();
 
         if (errors.Count > 0)
         {
@@ -244,7 +290,7 @@ public partial class PortProxyTab : UserControl
             if (Window.GetWindow(this) is MainWindow mw) mw.SetCommandPreview(cmd);
         }
 
-        RefreshData();
+        await RefreshDataAsync();
     }
 
     // --- 筛选 ---

@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -51,7 +52,7 @@ public partial class MainWindow : Window
         catch { }
     }
 
-    private void BtnBackup_Click(object sender, RoutedEventArgs e)
+    private async void BtnBackup_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.SaveFileDialog
         {
@@ -69,13 +70,17 @@ public partial class MainWindow : Window
 
         try
         {
-            var results = new List<string>();
-            results.Add(RegistryBackupService.BackupKeyToPath(
-                @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList",
-                System.IO.Path.Combine(dir, $"{baseName}_NetworkList.reg")));
-            results.Add(RegistryBackupService.BackupKeyToPath(
-                @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}",
-                System.IO.Path.Combine(dir, $"{baseName}_NetworkControl.reg")));
+            var results = await Task.Run(() =>
+            {
+                var r = new List<string>();
+                r.Add(RegistryBackupService.BackupKeyToPath(
+                    @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList",
+                    System.IO.Path.Combine(dir, $"{baseName}_NetworkList.reg")));
+                r.Add(RegistryBackupService.BackupKeyToPath(
+                    @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}",
+                    System.IO.Path.Combine(dir, $"{baseName}_NetworkControl.reg")));
+                return r;
+            });
 
             MessageBox.Show($"备份完成，已保存到：\n\n{string.Join("\n", results)}", "备份完成",
                 MessageBoxButton.OK, MessageBoxImage.Information);

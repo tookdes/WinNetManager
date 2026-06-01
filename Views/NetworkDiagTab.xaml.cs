@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -19,7 +20,24 @@ public partial class NetworkDiagTab : UserControl
     {
         InitializeComponent();
         ConnectionGrid.ItemsSource = _connections;
-        Loaded += (_, _) => RefreshConnections();
+        Loaded += async (_, _) => await RefreshConnectionsAsync();
+    }
+
+    private async Task RefreshConnectionsAsync()
+    {
+        try
+        {
+            var conns = await Task.Run(() => GetTcpConnections());
+            _connections.Clear();
+            foreach (var c in conns)
+                _connections.Add(c);
+            SetStatus($"已加载 {_connections.Count} 条 TCP 连接");
+            EmptyState.Visibility = _connections.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"加载连接信息失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void RefreshConnections()
@@ -98,7 +116,7 @@ public partial class NetworkDiagTab : UserControl
 
     // --- 按钮事件 ---
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshConnections();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshConnectionsAsync();
 
     private void BtnPortTest_Click(object sender, RoutedEventArgs e)
     {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -22,7 +23,32 @@ public partial class DnsTab : UserControl
     public DnsTab()
     {
         InitializeComponent();
-        Loaded += (_, _) => RefreshData();
+        Loaded += async (_, _) => await RefreshDataAsync();
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        try
+        {
+            var (nrptRules, dnsServers) = await Task.Run(() => (_manager.GetRules(), _manager.GetInterfaceDnsServers()));
+            _rules.Clear();
+            foreach (var r in nrptRules)
+                _rules.Add(r);
+            _nrptView = CollectionViewSource.GetDefaultView(_rules);
+            _nrptView.Filter = NrptFilter;
+            NrptGrid.ItemsSource = _nrptView;
+
+            _allDns = dnsServers;
+            _dnsView = CollectionViewSource.GetDefaultView(_allDns);
+            _dnsView.Filter = DnsFilter;
+            InterfaceDnsGrid.ItemsSource = _dnsView;
+
+            UpdateCount();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"加载配置失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void RefreshData()
@@ -91,12 +117,12 @@ public partial class DnsTab : UserControl
     private List<NrptRule> GetSelected() =>
         NrptGrid.SelectedItems.Cast<NrptRule>().ToList();
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshDataAsync();
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => NrptGrid.SelectAll();
     private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.InvertSelection(NrptGrid, _rules);
 
-    private void BtnAdd_Click(object sender, RoutedEventArgs e)
+    private async void BtnAdd_Click(object sender, RoutedEventArgs e)
     {
         var ns = NetworkProfileTab.PromptInput("新建 NRPT 规则",
             "域名后缀（如 *.corp.local 或 corp.local）：", "*.corp.local");
@@ -109,11 +135,11 @@ public partial class DnsTab : UserControl
         var comment = NetworkProfileTab.PromptInput("新建 NRPT 规则",
             "备注（可选）：", "");
 
-        var res = _manager.AddRule(ns, servers, comment);
+        var res = await Task.Run(() => _manager.AddRule(ns, servers, comment));
         if (res.Success)
         {
             SetStatus($"已添加 NRPT 规则：{ns} -> {servers}");
-            RefreshData();
+            await RefreshDataAsync();
         }
         else
         {
@@ -121,7 +147,7 @@ public partial class DnsTab : UserControl
         }
     }
 
-    private void BtnDelete_Click(object sender, RoutedEventArgs e)
+    private async void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
         var selected = GetSelected();
         if (selected.Count == 0)
@@ -135,14 +161,17 @@ public partial class DnsTab : UserControl
             "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        int ok = 0;
-        var errors = new List<string>();
-        foreach (var rule in selected)
+        var results = await Task.Run(() =>
         {
-            var res = _manager.DeleteRule(rule.Name, rule.GpoName);
-            if (res.Success) ok++;
-            else errors.Add($"{rule.Namespace}: {res.Message}");
-        }
+            var list = new List<(NrptRule rule, DnsResult result)>();
+            foreach (var rule in selected)
+                list.Add((rule, _manager.DeleteRule(rule.Name, rule.GpoName)));
+            return list;
+        });
+
+        int ok = results.Count(r => r.result.Success);
+        var errors = results.Where(r => !r.result.Success)
+            .Select(r => $"{r.rule.Namespace}: {r.result.Message}").ToList();
 
         if (errors.Count > 0)
         {
@@ -154,10 +183,10 @@ public partial class DnsTab : UserControl
             SetStatus($"已删除 {ok}/{selected.Count} 条 NRPT 规则");
         }
 
-        RefreshData();
+        await RefreshDataAsync();
     }
 
-    private void BtnResolve_Click(object sender, RoutedEventArgs e)
+    private async void BtnResolve_Click(object sender, RoutedEventArgs e)
     {
         string domain = TxtResolveDomain.Text?.Trim() ?? "";
         if (string.IsNullOrEmpty(domain))
@@ -170,7 +199,7 @@ public partial class DnsTab : UserControl
 
         try
         {
-            var res = _manager.ResolveDomain(domain);
+            var res = await Task.Run(() => _manager.ResolveDomain(domain));
             if (res.Success)
             {
                 TxtResolveResult.Text = res.Records.Count > 0
@@ -190,9 +219,9 @@ public partial class DnsTab : UserControl
         }
     }
 
-    private void BtnFlushDns_Click(object sender, RoutedEventArgs e)
+    private async void BtnFlushDns_Click(object sender, RoutedEventArgs e)
     {
-        var res = _manager.FlushCache();
+        var res = await Task.Run(() => _manager.FlushCache());
         if (res.Success)
         {
             TbkFlushResult.Text = "DNS 缓存已刷新。";
@@ -254,7 +283,7 @@ public partial class DnsTab : UserControl
         UpdateCount();
     }
 
-    private void BtnEditDns_Click(object sender, RoutedEventArgs e)
+    private async void BtnEditDns_Click(object sender, RoutedEventArgs e)
     {
         var selected = GetSelectedDns();
         if (selected.Count == 0)
@@ -273,15 +302,16 @@ public partial class DnsTab : UserControl
 
         if (input == null) return;
 
-        var errors = new List<string>();
-        foreach (var item in selected)
+        var results = await Task.Run(() =>
         {
-            var result = _manager.SetInterfaceDns(item.InterfaceAlias, item.AddressFamily, input);
-            if (!result.Success)
-            {
-                errors.Add($"{item.InterfaceAlias} ({item.AddressFamily}): {result.Message}");
-            }
-        }
+            var list = new List<(InterfaceDnsInfo item, DnsResult result)>();
+            foreach (var item in selected)
+                list.Add((item, _manager.SetInterfaceDns(item.InterfaceAlias, item.AddressFamily, input)));
+            return list;
+        });
+
+        var errors = results.Where(r => !r.result.Success)
+            .Select(r => $"{r.item.InterfaceAlias} ({r.item.AddressFamily}): {r.result.Message}").ToList();
 
         if (errors.Count > 0)
         {
@@ -290,11 +320,11 @@ public partial class DnsTab : UserControl
                 "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
-        RefreshData();
+        await RefreshDataAsync();
         SetStatus($"DNS 服务器已更新，{selected.Count - errors.Count}/{selected.Count} 成功");
     }
 
-    private void BtnAutoDns_Click(object sender, RoutedEventArgs e)
+    private async void BtnAutoDns_Click(object sender, RoutedEventArgs e)
     {
         var selected = GetSelectedDns();
         if (selected.Count == 0)
@@ -308,15 +338,16 @@ public partial class DnsTab : UserControl
             "确认自动获取", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
-        var errors = new List<string>();
-        foreach (var item in selected)
+        var results = await Task.Run(() =>
         {
-            var result = _manager.SetInterfaceDns(item.InterfaceAlias, item.AddressFamily, "");
-            if (!result.Success)
-            {
-                errors.Add($"{item.InterfaceAlias} ({item.AddressFamily}): {result.Message}");
-            }
-        }
+            var list = new List<(InterfaceDnsInfo item, DnsResult result)>();
+            foreach (var item in selected)
+                list.Add((item, _manager.SetInterfaceDns(item.InterfaceAlias, item.AddressFamily, "")));
+            return list;
+        });
+
+        var errors = results.Where(r => !r.result.Success)
+            .Select(r => $"{r.item.InterfaceAlias} ({r.item.AddressFamily}): {r.result.Message}").ToList();
 
         if (errors.Count > 0)
         {
@@ -325,7 +356,7 @@ public partial class DnsTab : UserControl
                 "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
-        RefreshData();
+        await RefreshDataAsync();
         SetStatus($"DNS 已设为自动获取，{selected.Count - errors.Count}/{selected.Count} 成功");
     }
 
