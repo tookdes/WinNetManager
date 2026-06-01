@@ -31,9 +31,9 @@ public partial class InterfaceMetricTab : UserControl
         {
             var (metrics, gateways) = await Task.Run(() => (_manager.GetMetrics(), _manager.GetGatewayMetrics()));
             _allMetrics = metrics;
+            _allMetrics.Sort((a, b) => a.InterfaceMetric.CompareTo(b.InterfaceMetric));
             _view = CollectionViewSource.GetDefaultView(_allMetrics);
             _view.Filter = MetricFilter;
-            _view.SortDescriptions.Add(new SortDescription("InterfaceMetric", ListSortDirection.Ascending));
             MetricGrid.ItemsSource = _view;
 
             _allGateways = gateways;
@@ -59,9 +59,9 @@ public partial class InterfaceMetricTab : UserControl
         try
         {
             _allMetrics = _manager.GetMetrics();
+            _allMetrics.Sort((a, b) => a.InterfaceMetric.CompareTo(b.InterfaceMetric));
             _view = CollectionViewSource.GetDefaultView(_allMetrics);
             _view.Filter = MetricFilter;
-            _view.SortDescriptions.Add(new SortDescription("InterfaceMetric", ListSortDirection.Ascending));
             MetricGrid.ItemsSource = _view;
 
             _allGateways = _manager.GetGatewayMetrics();
