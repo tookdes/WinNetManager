@@ -121,19 +121,19 @@ public partial class RouteEditWindow : Window
 
         if (string.IsNullOrEmpty(prefix))
         {
-            MessageBox.Show(this, "请输入目标前缀。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("请输入目标前缀。", "输入无效", MessageBoxImage.Warning, this);
             return;
         }
 
         if (string.IsNullOrEmpty(interfaceAlias))
         {
-            MessageBox.Show(this, "请输入或选择接口别名。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("请输入或选择接口别名。", "输入无效", MessageBoxImage.Warning, this);
             return;
         }
 
         if (!int.TryParse(metricText, out int metric) || metric < 0)
         {
-            MessageBox.Show(this, "度量值必须为正整数。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("度量值必须为正整数。", "输入无效", MessageBoxImage.Warning, this);
             return;
         }
 
@@ -141,15 +141,15 @@ public partial class RouteEditWindow : Window
         {
             if (wasBareIp)
             {
-                MessageBox.Show(this, $"无法将 \"{prefix.Substring(0, prefix.IndexOf('/') >= 0 ? prefix.IndexOf('/') : prefix.Length)}\" 识别为有效的 {family} 地址。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+                CopyableMessageBox.Show($"无法将 \"{prefix.Substring(0, prefix.IndexOf('/') >= 0 ? prefix.IndexOf('/') : prefix.Length)}\" 识别为有效的 {family} 地址。", "输入无效", MessageBoxImage.Warning, this);
             }
             else if (family == "IPv4")
             {
-                MessageBox.Show(this, "目标前缀格式无效。\n\nIPv4 请使用 CIDR 格式，例如：192.168.1.0/24", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+                CopyableMessageBox.Show("目标前缀格式无效。\n\nIPv4 请使用 CIDR 格式，例如：192.168.1.0/24", "输入无效", MessageBoxImage.Warning, this);
             }
             else
             {
-                MessageBox.Show(this, "目标前缀格式无效。\n\nIPv6 请使用 CIDR 格式，例如：2400::/48", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+                CopyableMessageBox.Show("目标前缀格式无效。\n\nIPv6 请使用 CIDR 格式，例如：2400::/48", "输入无效", MessageBoxImage.Warning, this);
             }
             return;
         }
@@ -158,7 +158,7 @@ public partial class RouteEditWindow : Window
         {
             if (!IPAddress.TryParse(nextHop, out IPAddress? ip) || ip?.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
             {
-                MessageBox.Show(this, "下一跳必须是有效的 IPv4 地址。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+                CopyableMessageBox.Show("下一跳必须是有效的 IPv4 地址。", "输入无效", MessageBoxImage.Warning, this);
                 return;
             }
         }
@@ -166,7 +166,7 @@ public partial class RouteEditWindow : Window
         {
             if (!IPAddress.TryParse(nextHop, out IPAddress? ip) || ip?.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
             {
-                MessageBox.Show(this, "下一跳必须是有效的 IPv6 地址。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+                CopyableMessageBox.Show("下一跳必须是有效的 IPv6 地址。", "输入无效", MessageBoxImage.Warning, this);
                 return;
             }
         }

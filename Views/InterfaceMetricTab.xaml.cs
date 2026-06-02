@@ -50,7 +50,7 @@ public partial class InterfaceMetricTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载网卡跃点信息失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载网卡跃点信息失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -78,7 +78,7 @@ public partial class InterfaceMetricTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载网卡跃点信息失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载网卡跃点信息失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -140,7 +140,7 @@ public partial class InterfaceMetricTab : UserControl
         var selected = GetSelected();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -155,7 +155,7 @@ public partial class InterfaceMetricTab : UserControl
 
         if (!int.TryParse(input, out int metric) || metric < 0)
         {
-            MessageBox.Show("请输入有效的非负整数跃点数。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("请输入有效的非负整数跃点数。", "输入无效", MessageBoxImage.Warning);
             return;
         }
 
@@ -180,9 +180,9 @@ public partial class InterfaceMetricTab : UserControl
 
         if (errors.Count > 0)
         {
-            MessageBox.Show(
+            CopyableMessageBox.Show(
                 $"成功 {selected.Count - errors.Count}/{selected.Count} 个。\n\n失败项：\n{string.Join("\n", errors)}",
-                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "操作结果", MessageBoxImage.Warning);
         }
 
         await LoadDataAsync();
@@ -194,7 +194,7 @@ public partial class InterfaceMetricTab : UserControl
         var selected = GetSelected();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -227,9 +227,9 @@ public partial class InterfaceMetricTab : UserControl
 
         if (errors.Count > 0)
         {
-            MessageBox.Show(
+            CopyableMessageBox.Show(
                 $"成功 {selected.Count - errors.Count}/{selected.Count} 个。\n\n失败项：\n{string.Join("\n", errors)}",
-                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "操作结果", MessageBoxImage.Warning);
         }
 
         await LoadDataAsync();
@@ -241,7 +241,7 @@ public partial class InterfaceMetricTab : UserControl
         var selected = GetSelectedGateways();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择至少一个网关。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择至少一个网关。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -256,7 +256,7 @@ public partial class InterfaceMetricTab : UserControl
 
         if (!int.TryParse(input, out int metric) || metric < 0)
         {
-            MessageBox.Show("请输入有效的非负整数跃点数。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("请输入有效的非负整数跃点数。", "输入无效", MessageBoxImage.Warning);
             return;
         }
 
@@ -281,9 +281,9 @@ public partial class InterfaceMetricTab : UserControl
 
         if (errors.Count > 0)
         {
-            MessageBox.Show(
+            CopyableMessageBox.Show(
                 $"成功 {selected.Count - errors.Count}/{selected.Count} 个。\n\n失败项：\n{string.Join("\n", errors)}",
-                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "操作结果", MessageBoxImage.Warning);
         }
 
         await LoadDataAsync();

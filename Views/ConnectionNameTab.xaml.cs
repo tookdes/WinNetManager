@@ -26,7 +26,7 @@ public partial class ConnectionNameTab : UserControl
             SetStatus($"已加载 {_connections.Count} 个连接");
             EmptyState.Visibility = _connections.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
-        catch (Exception ex) { MessageBox.Show($"读取连接信息失败：\n{ex.Message}"); }
+        catch (Exception ex) { CopyableMessageBox.Show($"读取连接信息失败：\n{ex.Message}"); }
     }
 
     private List<ConnectionInfo> GetSelected() =>
@@ -40,18 +40,18 @@ public partial class ConnectionNameTab : UserControl
     private void BtnRename_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected();
-        if (sel.Count != 1) { MessageBox.Show("请选择一个连接进行重命名。"); return; }
+        if (sel.Count != 1) { CopyableMessageBox.Show("请选择一个连接进行重命名。"); return; }
         var c = sel[0];
         string? n = NetworkProfileTab.PromptInput("重命名连接", $"当前名称: {c.Name}\n请输入新名称:", c.Name);
         if (n == null || n == c.Name) return;
         try { ConnectionNameService.RenameConnection(c.Guid, n); SetStatus($"已将 \"{c.Name}\" 重命名为 \"{n}\""); RefreshData(); }
-        catch (Exception ex) { MessageBox.Show($"重命名失败：\n{ex.Message}"); }
+        catch (Exception ex) { CopyableMessageBox.Show($"重命名失败：\n{ex.Message}"); }
     }
 
     private void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected().Where(c => !c.HasActiveAdapter).ToList();
-        if (sel.Count == 0) { MessageBox.Show("请选中至少一个无设备的连接条目进行删除。\n有活跃适配器的连接不能删除。"); return; }
+        if (sel.Count == 0) { CopyableMessageBox.Show("请选中至少一个无设备的连接条目进行删除。\n有活跃适配器的连接不能删除。"); return; }
         var names = string.Join("\n", sel.Select(c => $"  - {c.Name}"));
         if (MessageBox.Show($"确定要删除以下 {sel.Count} 个连接条目？\n\n{names}\n\n此操作不可撤销（但可通过备份恢复）。",
             "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;

@@ -36,7 +36,7 @@ public partial class NetworkDiagTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载连接信息失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载连接信息失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -52,7 +52,7 @@ public partial class NetworkDiagTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载连接信息失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载连接信息失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -125,13 +125,13 @@ public partial class NetworkDiagTab : UserControl
 
         if (string.IsNullOrEmpty(target))
         {
-            MessageBox.Show("请输入目标地址。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请输入目标地址。", "提示", MessageBoxImage.Information);
             return;
         }
 
         if (!int.TryParse(portText, out int port) || port <= 0 || port > 65535)
         {
-            MessageBox.Show("请输入有效的端口号（1-65535）。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请输入有效的端口号（1-65535）。", "提示", MessageBoxImage.Information);
             return;
         }
 
@@ -144,7 +144,7 @@ public partial class NetworkDiagTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"启动失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"启动失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -153,7 +153,7 @@ public partial class NetworkDiagTab : UserControl
         string target = TxtTarget.Text?.Trim() ?? "";
         if (string.IsNullOrEmpty(target))
         {
-            MessageBox.Show("请输入目标地址。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请输入目标地址。", "提示", MessageBoxImage.Information);
             return;
         }
 
@@ -165,7 +165,7 @@ public partial class NetworkDiagTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"启动失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"启动失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -174,7 +174,7 @@ public partial class NetworkDiagTab : UserControl
         string target = TxtTarget.Text?.Trim() ?? "";
         if (string.IsNullOrEmpty(target))
         {
-            MessageBox.Show("请输入目标地址。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请输入目标地址。", "提示", MessageBoxImage.Information);
             return;
         }
 
@@ -186,7 +186,7 @@ public partial class NetworkDiagTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"启动失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"启动失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -205,7 +205,7 @@ public partial class NetworkDiagTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"扫描失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"扫描失败：{ex.Message}", "错误", MessageBoxImage.Error);
             SetStatus("扫描失败");
             return;
         }

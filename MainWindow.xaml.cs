@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using WinNetManager.Services;
+using WinNetManager.Views;
 
 namespace WinNetManager;
 
@@ -82,14 +83,14 @@ public partial class MainWindow : Window
                 return r;
             });
 
-            MessageBox.Show($"备份完成，已保存到：\n\n{string.Join("\n", results)}", "备份完成",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show($"备份完成，已保存到：\n\n{string.Join("\n", results)}", "备份完成",
+                MessageBoxImage.Information);
             SetStatus($"备份完成 → {dir}");
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"备份失败：\n{ex.Message}", "错误",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"备份失败：\n{ex.Message}", "错误",
+                MessageBoxImage.Error);
         }
     }
 

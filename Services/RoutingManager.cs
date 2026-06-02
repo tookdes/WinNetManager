@@ -41,6 +41,10 @@ public class RoutingManager
         string error;
         string output = RunPowerShell(script, out error);
 
+        // -PolicyStore 可能不支持，fallback 到注册表
+        if (!string.IsNullOrEmpty(error) && (ContainsIgnoreCase(error, "Invalid parameter") || ContainsIgnoreCase(error, "参数无效")))
+            return GetPersistentRoutesViaRoutePrint(addressFamily);
+
         var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
         if (lines.Length < 2) return routes;
 
@@ -70,6 +74,108 @@ public class RoutingManager
         }
 
         return routes;
+    }
+
+    /// <summary>
+    /// Fallback: read persistent routes from the registry
+    /// HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\PersistentRoutes
+    /// Each line: "dest,mask,nexthop,metric"
+    /// </summary>
+    private List<RouteEntry> GetPersistentRoutesViaRoutePrint(string? addressFamily)
+    {
+        var routes = new List<RouteEntry>();
+        bool wantV6 = addressFamily == "IPv6";
+        bool wantV4 = string.IsNullOrEmpty(addressFamily) || addressFamily == "IPv4";
+
+        // Read IPv4 persistent routes from registry
+        if (wantV4)
+        {
+            string script =
+                "Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\PersistentRoutes' -ErrorAction SilentlyContinue | " +
+                "Get-Member -MemberType NoteProperty | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object { " +
+                "$val = (Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\PersistentRoutes' -Name $_.Name).($_.Name); " +
+                "$_.Name + ',' + $val }";
+            string error;
+            string output = RunPowerShell(script, out error);
+
+            foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                // Format: "dest,mask,nexthop,metric,"  (key=name, value=empty or trailing comma)
+                // Actually registry value name = "dest,mask,nexthop,metric" and value = ""
+                string entry = line.TrimEnd(',').Trim();
+                var parts = entry.Split(',');
+                if (parts.Length >= 3)
+                {
+                    string dest = parts[0].Trim();
+                    string mask = parts[1].Trim();
+                    string hop = parts[2].Trim();
+                    string metric = parts.Length >= 4 ? parts[3].Trim() : "1";
+                    routes.Add(new RouteEntry
+                    {
+                        AddressFamily = "IPv4",
+                        DestinationPrefix = $"{dest}/{MaskToCidr(mask)}",
+                        NextHop = hop,
+                        InterfaceAlias = "",
+                        InterfaceIndex = "",
+                        RouteMetric = metric,
+                        Store = "PersistentStore"
+                    });
+                }
+            }
+        }
+
+        // IPv6 persistent routes are in:
+        // HKLM\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\PersistentRoutes
+        if (wantV6)
+        {
+            string script =
+                "Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\PersistentRoutes' -ErrorAction SilentlyContinue | " +
+                "Get-Member -MemberType NoteProperty | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object { " +
+                "$val = (Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\PersistentRoutes' -Name $_.Name).($_.Name); " +
+                "$_.Name + ',' + $val }";
+            string error;
+            string output = RunPowerShell(script, out error);
+
+            foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string entry = line.TrimEnd(',').Trim();
+                var parts = entry.Split(',');
+                if (parts.Length >= 3)
+                {
+                    string dest = parts[0].Trim();
+                    string prefixLen = parts.Length >= 4 ? parts[3].Trim() : "128";
+                    string hop = parts[2].Trim();
+                    routes.Add(new RouteEntry
+                    {
+                        AddressFamily = "IPv6",
+                        DestinationPrefix = $"{dest}/{prefixLen}",
+                        NextHop = hop,
+                        InterfaceAlias = "",
+                        InterfaceIndex = "",
+                        RouteMetric = "1",
+                        Store = "PersistentStore"
+                    });
+                }
+            }
+        }
+
+        return routes;
+    }
+
+    private static bool ContainsIgnoreCase(string source, string value)
+        => source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;
+
+    private static int MaskToCidr(string mask)
+    {
+        if (!System.Net.IPAddress.TryParse(mask, out var ip)) return 32;
+        byte[] bytes = ip.GetAddressBytes();
+        int cidr = 0;
+        foreach (byte b in bytes)
+        {
+            int v = b;
+            while (v != 0) { cidr++; v &= v - 1; }
+        }
+        return cidr;
     }
 
     public List<NetInterface> GetInterfaces()
@@ -113,50 +219,55 @@ public class RoutingManager
 
     public RouteCommandResult AddRoute(RouteEntry route)
     {
-        string family = route.AddressFamily == "IPv6" ? "IPv6" : "IPv4";
-        string script =
-            $"New-NetRoute -AddressFamily {family} " +
-            $"-DestinationPrefix '{ProcessRunner.EscapePsSingleQuoted(route.DestinationPrefix)}' " +
-            $"-InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias)}' " +
-            $"-NextHop '{ProcessRunner.EscapePsSingleQuoted(route.NextHop)}' " +
-            $"-RouteMetric {route.RouteMetric} " +
-            $"-PolicyStore PersistentStore";
+        string prefix = route.DestinationPrefix ?? "";
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
+        string safeHop = ProcessRunner.EscapePsSingleQuoted(route.NextHop);
+        string metric = route.RouteMetric ?? "1";
 
-        return ExecuteWritePowerShell(script);
+        string cmd;
+        if (route.AddressFamily == "IPv6")
+            cmd = $"netsh interface ipv6 add route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} metric={metric} store=persistent";
+        else
+            cmd = $"netsh interface ipv4 add route {prefix} interface='{safeAlias}' nexthop={safeHop} metric={metric} store=persistent";
+
+        return ExecuteNetsh(cmd);
     }
 
     public RouteCommandResult DeleteRoute(RouteEntry route)
     {
-        string family = route.AddressFamily == "IPv6" ? "IPv6" : "IPv4";
-        string script =
-            $"Remove-NetRoute -AddressFamily {family} " +
-            $"-DestinationPrefix '{ProcessRunner.EscapePsSingleQuoted(route.DestinationPrefix)}' " +
-            $"-InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias)}' " +
-            $"-NextHop '{ProcessRunner.EscapePsSingleQuoted(route.NextHop)}' " +
-            $"-RouteMetric {route.RouteMetric} " +
-            $"-PolicyStore PersistentStore -Confirm:$false";
+        string prefix = route.DestinationPrefix ?? "";
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
+        string safeHop = ProcessRunner.EscapePsSingleQuoted(route.NextHop);
 
-        return ExecuteWritePowerShell(script);
+        string cmd;
+        if (route.AddressFamily == "IPv6")
+            cmd = $"netsh interface ipv6 delete route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} store=persistent";
+        else
+            cmd = $"netsh interface ipv4 delete route {prefix} interface='{safeAlias}' nexthop={safeHop} store=persistent";
+
+        return ExecuteNetsh(cmd);
     }
 
-    private RouteCommandResult ExecuteWritePowerShell(string script)
+    private RouteCommandResult ExecuteNetsh(string netshCmd)
     {
+        string script = $"& {netshCmd}";
         string error;
-        string output = RunPowerShell(script, out error, timeoutMs: 30000);
+        string output = RunPowerShell(script, out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
-        {
-            string msg = error.Trim();
-            if (msg.Contains("需要提升的权限") || msg.Contains("requires elevation") || msg.Contains("Access is denied"))
-                msg = "需要以管理员身份运行本程序。";
-            else if (msg.Contains("已存在") || msg.Contains("already exists"))
-                msg = "该路由已存在。";
+        string combined = (output + " " + error).Trim();
+        // netsh 成功时输出 "Ok." 或 "确定。"（精确匹配，避免误匹配含 "ok" 的单词）
+        if (combined == "Ok." || combined == "确定。" || combined == "Ok" || combined == "确定")
+            return new RouteCommandResult { Success = true, Message = combined };
 
-            return new RouteCommandResult { Success = false, Message = msg };
-        }
+        string msg = combined;
+        if (ContainsIgnoreCase(msg, "Access is denied") || ContainsIgnoreCase(msg, "拒绝访问") || ContainsIgnoreCase(msg, "需要提升的权限"))
+            msg = "需要以管理员身份运行本程序。";
+        else if (ContainsIgnoreCase(msg, "already exists") || ContainsIgnoreCase(msg, "已存在"))
+            msg = "该路由已存在。";
 
-        return new RouteCommandResult { Success = true, Message = output };
+        return new RouteCommandResult { Success = false, Message = msg };
     }
+
 
     private string[] ParseCsvLine(string line)
     {

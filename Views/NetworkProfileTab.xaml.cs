@@ -34,7 +34,7 @@ public partial class NetworkProfileTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"读取网络配置文件失败：\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"读取网络配置文件失败：\n{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -51,7 +51,7 @@ public partial class NetworkProfileTab : UserControl
     private void BtnRename_Click(object sender, RoutedEventArgs e)
     {
         var selected = GetSelected();
-        if (selected.Count != 1) { MessageBox.Show("请选择一个配置文件进行重命名。"); return; }
+        if (selected.Count != 1) { CopyableMessageBox.Show("请选择一个配置文件进行重命名。"); return; }
         var p = selected[0];
         string? n = PromptInput("重命名网络配置文件", $"当前名称: {p.ProfileName}\n请输入新名称:", p.ProfileName, Window.GetWindow(this));
         if (n == null || n == p.ProfileName) return;
@@ -61,7 +61,7 @@ public partial class NetworkProfileTab : UserControl
             SetStatus($"已将 \"{p.ProfileName}\" 重命名为 \"{n}\"");
             RefreshData();
         }
-        catch (Exception ex) { MessageBox.Show($"重命名失败：\n{ex.Message}"); }
+        catch (Exception ex) { CopyableMessageBox.Show($"重命名失败：\n{ex.Message}"); }
     }
 
     private void BtnSetPublic_Click(object sender, RoutedEventArgs e) => SetCategory(NetworkCategory.Public);
@@ -70,7 +70,7 @@ public partial class NetworkProfileTab : UserControl
     private void SetCategory(NetworkCategory cat)
     {
         var sel = GetSelected();
-        if (sel.Count == 0) { MessageBox.Show("请先选中至少一个配置文件。"); return; }
+        if (sel.Count == 0) { CopyableMessageBox.Show("请先选中至少一个配置文件。"); return; }
         string cn = cat == NetworkCategory.Public ? "公用" : "专用";
         int ok = 0;
         foreach (var p in sel)
@@ -90,7 +90,7 @@ public partial class NetworkProfileTab : UserControl
     private void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected().Where(p => !p.IsConnected).ToList();
-        if (sel.Count == 0) { MessageBox.Show("请选中至少一个未连接的历史配置文件进行删除。\n当前连接的网络不能删除。"); return; }
+        if (sel.Count == 0) { CopyableMessageBox.Show("请选中至少一个未连接的历史配置文件进行删除。\n当前连接的网络不能删除。"); return; }
         var names = string.Join("\n", sel.Select(p => $"  - {p.ProfileName}"));
         if (MessageBox.Show($"确定要删除以下 {sel.Count} 个历史网络配置文件？\n\n{names}\n\n此操作不可撤销（但可通过备份恢复）。",
             "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;

@@ -342,10 +342,23 @@ public static class NetworkHealthService
                 // 只在实际设置了代理时才报告，直接连接不算风险
                 if (!isDirect)
                 {
-                    // 提取代理服务器地址，不展示原始 netsh 输出
-                    string proxyAddr = winHttpProxy.Split('\n')
-                        .FirstOrDefault(l => l.Contains(':') && !l.Contains("设置") && !l.Contains("direct"))
-                        ?.Trim() ?? winHttpProxy;
+                    // 提取代理服务器地址，不展示原始 netsh 输出。避免匹配到包含冒号的标题行。
+                    string? line = winHttpProxy.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                        .FirstOrDefault(l => (l.Contains("Proxy Server", StringComparison.OrdinalIgnoreCase)
+                                           || l.Contains("代理服务器"))
+                                          && !l.Contains("设置", StringComparison.OrdinalIgnoreCase)
+                                          && !l.Contains("settings", StringComparison.OrdinalIgnoreCase));
+
+                    string proxyAddr = winHttpProxy;
+                    if (line != null)
+                    {
+                        int colonIdx = line.IndexOf(':');
+                        if (colonIdx >= 0)
+                        {
+                            proxyAddr = line.Substring(colonIdx + 1).Trim();
+                        }
+                    }
+
                     items.Add(new NetworkHealthItem
                     {
                         Category = "代理",

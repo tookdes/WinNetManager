@@ -27,7 +27,7 @@ public partial class GhostAdapterTab : UserControl
             SetStatus($"已加载 {_adapters.Count} 个网络适配器（{ghosts} 个幽灵设备）");
             EmptyState.Visibility = _adapters.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
-        catch (Exception ex) { MessageBox.Show($"枚举网络适配器失败：\n{ex.Message}"); }
+        catch (Exception ex) { CopyableMessageBox.Show($"枚举网络适配器失败：\n{ex.Message}"); }
     }
 
     private List<GhostAdapter> GetSelected() =>
@@ -41,7 +41,7 @@ public partial class GhostAdapterTab : UserControl
     private void BtnRemove_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected().Where(a => !a.IsPresent).ToList();
-        if (sel.Count == 0) { MessageBox.Show("请选中要卸载的幽灵设备。\n活跃设备不能通过此方式卸载。\n\n注意：WAN Miniport 等系统虚拟设备不应卸载。"); return; }
+        if (sel.Count == 0) { CopyableMessageBox.Show("请选中要卸载的幽灵设备。\n活跃设备不能通过此方式卸载。\n\n注意：WAN Miniport 等系统虚拟设备不应卸载。"); return; }
         var names = string.Join("\n", sel.Select(a => $"  - {a.FriendlyName} ({a.DeviceInstanceId})"));
         if (MessageBox.Show($"确定要卸载以下 {sel.Count} 个幽灵设备？\n\n{names}\n\n此操作会从设备管理器中移除这些设备。",
             "确认卸载", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
@@ -52,7 +52,7 @@ public partial class GhostAdapterTab : UserControl
             catch { fail++; }
         }
         string msg = $"卸载完成：成功 {ok}，失败 {fail}";
-        MessageBox.Show(msg, "卸载结果", MessageBoxButton.OK, fail > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+        CopyableMessageBox.Show(msg, "卸载结果", fail > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
         SetStatus(msg);
         RefreshData();
     }

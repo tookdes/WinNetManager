@@ -45,7 +45,7 @@ public partial class PersistentRouteTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载路由失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载路由失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -66,7 +66,7 @@ public partial class PersistentRouteTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载路由失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载路由失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -145,14 +145,14 @@ public partial class PersistentRouteTab : UserControl
         var selected = GetSelected();
         if (selected.Count != 1)
         {
-            MessageBox.Show("请选择一条路由进行修改。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请选择一条路由进行修改。", "未选择", MessageBoxImage.Information);
             return;
         }
 
         var route = selected[0];
         if (route.Status == ChangeStatus.Deleted)
         {
-            MessageBox.Show("已标记删除的路由不能修改。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("已标记删除的路由不能修改。", "提示", MessageBoxImage.Information);
             return;
         }
 
@@ -188,7 +188,7 @@ public partial class PersistentRouteTab : UserControl
         var selected = GetSelected();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择要删除的路由。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择要删除的路由。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -359,13 +359,22 @@ public partial class PersistentRouteTab : UserControl
 
     private static string GetRouteCommand(RouteEntry route, bool isDelete)
     {
-        string family = route.AddressFamily == "IPv6" ? "IPv6" : "IPv4";
-        string safePrefix = route.DestinationPrefix.Replace("'", "''");
         string safeAlias = route.InterfaceAlias.Replace("'", "''");
         string safeHop = route.NextHop.Replace("'", "''");
-        if (isDelete)
-            return $"Remove-NetRoute -AddressFamily {family} -DestinationPrefix '{safePrefix}' -InterfaceAlias '{safeAlias}' -NextHop '{safeHop}' -PolicyStore PersistentStore -Confirm:$false";
-        return $"New-NetRoute -AddressFamily {family} -DestinationPrefix '{safePrefix}' -InterfaceAlias '{safeAlias}' -NextHop '{safeHop}' -RouteMetric {route.RouteMetric} -PolicyStore PersistentStore";
+        string prefix = route.DestinationPrefix ?? "";
+
+        if (route.AddressFamily == "IPv6")
+        {
+            if (isDelete)
+                return $"netsh interface ipv6 delete route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} store=persistent";
+            return $"netsh interface ipv6 add route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} metric={route.RouteMetric} store=persistent";
+        }
+        else
+        {
+            if (isDelete)
+                return $"netsh interface ipv4 delete route {prefix} interface='{safeAlias}' nexthop={safeHop} store=persistent";
+            return $"netsh interface ipv4 add route {prefix} interface='{safeAlias}' nexthop={safeHop} metric={route.RouteMetric} store=persistent";
+        }
     }
 
     private static void ShowApplyResult(List<string> successes, List<string> errors)
@@ -386,7 +395,7 @@ public partial class PersistentRouteTab : UserControl
             sb.AppendLine("没有需要执行的操作。");
 
         var icon = errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information;
-        MessageBox.Show(sb.ToString(), "操作结果", MessageBoxButton.OK, icon);
+        CopyableMessageBox.Show(sb.ToString(), "操作结果", icon);
     }
 
     // --- 筛选 ---
@@ -473,12 +482,12 @@ public partial class PersistentRouteTab : UserControl
             ConfigExportService.Export(dlg.FileName, config);
 
             var msg = $"已导出 {currentRoutes.Count} 条持久路由到：\n{dlg.FileName}";
-            MessageBox.Show(msg, "导出完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show(msg, "导出完成", MessageBoxImage.Information);
             SetStatus(msg);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -499,7 +508,7 @@ public partial class PersistentRouteTab : UserControl
 
             if (importedRoutes.Count == 0)
             {
-                MessageBox.Show("配置文件中未找到持久路由数据。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                CopyableMessageBox.Show("配置文件中未找到持久路由数据。", "提示", MessageBoxImage.Information);
                 return;
             }
 
@@ -531,7 +540,7 @@ public partial class PersistentRouteTab : UserControl
 
             if (toAdd.Count == 0 && toModify.Count == 0)
             {
-                MessageBox.Show($"配置文件中所有 {skipped} 条路由均已存在，无需导入。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                CopyableMessageBox.Show($"配置文件中所有 {skipped} 条路由均已存在，无需导入。", "提示", MessageBoxImage.Information);
                 return;
             }
 
@@ -597,12 +606,12 @@ public partial class PersistentRouteTab : UserControl
             var msg = $"导入完成：新增 {toAdd.Count} 条，修改 {toModify.Count} 条，跳过 {skipped} 条。";
             msg += "\n\n请点击「应用更改」将修改写入系统。";
 
-            MessageBox.Show(msg, "导入完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show(msg, "导入完成", MessageBoxImage.Information);
             SetStatus(msg);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"导入失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"导入失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -613,7 +622,7 @@ public partial class PersistentRouteTab : UserControl
         string target = TxtTestTarget.Text?.Trim() ?? "";
         if (string.IsNullOrEmpty(target))
         {
-            MessageBox.Show("请输入目标 IP 地址或域名。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请输入目标 IP 地址或域名。", "提示", MessageBoxImage.Information);
             return;
         }
 
@@ -652,7 +661,7 @@ public partial class PersistentRouteTab : UserControl
                 string routeError;
                 string routeOutput = RunPowerShell(routeScript, out routeError, 15000);
 
-                if (!string.IsNullOrEmpty(routeError) && !routeError.Contains("警告"))
+                if (!string.IsNullOrEmpty(routeError) && routeError.IndexOf("警告", StringComparison.OrdinalIgnoreCase) < 0 && routeError.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) < 0)
                 {
                     sb.AppendLine($"路由查询失败：{routeError.Trim()}");
                 }
@@ -693,7 +702,7 @@ public partial class PersistentRouteTab : UserControl
                 string pingError;
                 string pingOutput = RunPowerShell(pingScript, out pingError, 20000);
 
-                if (!string.IsNullOrEmpty(pingError) && !pingError.Contains("警告"))
+                if (!string.IsNullOrEmpty(pingError) && pingError.IndexOf("警告", StringComparison.OrdinalIgnoreCase) < 0 && pingError.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) < 0)
                 {
                     sb.AppendLine($"Ping 失败：{pingError.Trim()}");
                 }

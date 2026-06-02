@@ -1,0 +1,17 @@
+<Window x:Class="WinNetManager.Views.CopyableMessageBox"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="提示" Height="300" Width="460"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        KeyDown="Window_KeyDown" MinHeight="150" MinWidth="300">
+    <DockPanel Margin="12">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button Content="复制全部" Padding="12,4" Margin="0,0,8,0" Click="BtnCopy_Click"/>
+            <Button Content="确定" Padding="16,4" IsDefault="True" Click="BtnOk_Click"/>
+        </StackPanel>
+        <TextBox x:Name="TxtContent" IsReadOnly="True" TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto" AcceptsReturn="True"
+                 FontFamily="Microsoft YaHei UI" FontSize="13"
+                 BorderThickness="0" Background="Transparent"/>
+    </DockPanel>
+</Window>

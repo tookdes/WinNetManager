@@ -29,7 +29,7 @@ public class PortProxyManager
             string error;
             string output = RunCommand("netsh", $"interface portproxy show {direction}", out error);
 
-            if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+            if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
                 continue;
 
             var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -81,7 +81,7 @@ public class PortProxyManager
         string error;
         RunCommand("netsh", args, out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
         {
             string msg = TranslateError(error.Trim());
             return new PortProxyResult { Success = false, Message = msg };
@@ -103,7 +103,7 @@ public class PortProxyManager
         string error;
         RunCommand("netsh", args, out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
         {
             string msg = TranslateError(error.Trim());
             return new PortProxyResult { Success = false, Message = msg };
@@ -120,7 +120,7 @@ public class PortProxyManager
         string error;
         RunCommand("netsh", args, out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
         {
             string msg = TranslateError(error.Trim());
             return new PortProxyResult { Success = false, Message = msg };
@@ -137,7 +137,7 @@ public class PortProxyManager
         string error;
         RunCommand("netsh", "interface portproxy reset", out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
         {
             return new PortProxyResult { Success = false, Message = error.Trim() };
         }
@@ -226,7 +226,7 @@ public class PortProxyManager
         string error;
         RunCommand("netsh", args, out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
         {
             return new PortProxyResult { Success = false, Message = TranslateFirewallError(error.Trim()) };
         }
@@ -242,7 +242,7 @@ public class PortProxyManager
         string error;
         RunCommand("netsh", args, out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
         {
             return new PortProxyResult { Success = false, Message = TranslateFirewallError(error.Trim()) };
         }
@@ -255,7 +255,7 @@ public class PortProxyManager
         var delRes = DeleteFirewallRule(oldRule);
 
         // 删除失败且不是因为规则不存在，报告错误
-        if (!delRes.Success && !delRes.Message.Contains("找不到"))
+        if (!delRes.Success && !CI(delRes.Message, "找不到"))
             return delRes;
 
         bool oldRuleExisted = delRes.Success;
@@ -281,7 +281,7 @@ public class PortProxyManager
         {
             string error;
             string output = RunCommand("sc", "query iphlpsvc", out error, 5000);
-            return output.Contains("RUNNING") || output.Contains("正在运行");
+            return CI(output, "RUNNING") || CI(output, "正在运行");
         }
         catch
         {
@@ -291,27 +291,26 @@ public class PortProxyManager
 
     private static string TranslateError(string error)
     {
-        if (error.Contains("Element not found") || error.Contains("找不到元素") || error.Contains("找不到"))
+        if (CI(error, "Element not found") || CI(error, "找不到元素") || CI(error, "找不到"))
             return "找不到指定的端口转发规则。";
-        if (error.Contains("already exists") || error.Contains("已存在"))
+        if (CI(error, "already exists") || CI(error, "已存在"))
             return "该端口转发规则已存在。";
-        if (error.Contains("Access is denied") || error.Contains("拒绝访问") || error.Contains("权限"))
+        if (CI(error, "Access is denied") || CI(error, "拒绝访问") || CI(error, "requires elevation"))
             return "权限不足，需要以管理员身份运行。";
-        if (error.Contains("requires elevation"))
-            return "需要以管理员身份运行。";
-        if (error.Contains("Invalid parameter") || error.Contains("参数无效") || error.Contains("参数"))
+        if (CI(error, "Invalid parameter") || CI(error, "参数无效"))
             return "参数无效，请检查地址和端口格式。";
         return error;
     }
 
     private static string TranslateFirewallError(string error)
     {
-        if (error.Contains("Access is denied") || error.Contains("拒绝访问") || error.Contains("权限"))
-            return "权限不足，无法修改防火墙规则。";
-        if (error.Contains("requires elevation"))
-            return "需要以管理员身份运行。";
-        if (error.Contains("No rules match") || error.Contains("找不到"))
+        if (CI(error, "Access is denied") || CI(error, "拒绝访问") || CI(error, "requires elevation"))
+            return "权限不足，需要以管理员身份运行。";
+        if (CI(error, "No rules match") || CI(error, "找不到"))
             return "找不到指定的防火墙规则。";
         return error;
     }
+
+    private static bool CI(string source, string value)
+        => source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;
 }

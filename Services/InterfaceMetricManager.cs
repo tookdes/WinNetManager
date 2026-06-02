@@ -25,7 +25,7 @@ public class InterfaceMetricManager
         string error;
         string output = ProcessRunner.RunPowerShell(script, out error, 15000);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return metrics;
 
         var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -116,7 +116,7 @@ public class InterfaceMetricManager
         string error;
         string output = ProcessRunner.RunPowerShell(script, out error, 15000);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return metrics;
 
         var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -175,12 +175,12 @@ public class InterfaceMetricManager
         string error;
         string output = ProcessRunner.RunPowerShell(script, out error, 15000);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
         {
             string msg = error.Trim();
-            if (msg.Contains("requires elevation") || msg.Contains("Access is denied") || msg.Contains("拒绝访问"))
+            if (CI(msg, "requires elevation") || CI(msg, "Access is denied") || CI(msg, "拒绝访问"))
                 msg = "错误：需要以管理员身份运行本程序。";
-            else if (msg.Contains("not found") || msg.Contains("找不到"))
+            else if (CI(msg, "not found") || CI(msg, "找不到"))
                 msg = "错误：找不到指定的网络接口。";
             return new MetricResult { Success = false, Message = msg };
         }
@@ -222,4 +222,7 @@ public class InterfaceMetricManager
         result.Add(sb.ToString().Trim());
         return result.ToArray();
     }
+
+    private static bool CI(string source, string value)
+        => source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;
 }

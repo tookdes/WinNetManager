@@ -53,25 +53,25 @@ public partial class PortProxyEditWindow : Window
 
         if (string.IsNullOrEmpty(listenAddr) || !IsValidAddress(listenAddr))
         {
-            MessageBox.Show(this, "监听地址必须是有效的 IP 地址，且不能包含特殊字符。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("监听地址必须是有效的 IP 地址，且不能包含特殊字符。", "输入无效", MessageBoxImage.Warning, this);
             return;
         }
 
         if (!IsValidPort(listenPortText, out int listenPort))
         {
-            MessageBox.Show(this, "监听端口必须是 1-65535 之间的整数。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("监听端口必须是 1-65535 之间的整数。", "输入无效", MessageBoxImage.Warning, this);
             return;
         }
 
         if (string.IsNullOrEmpty(connectAddr) || !IsValidAddress(connectAddr))
         {
-            MessageBox.Show(this, "目标地址必须是有效的 IP 地址，且不能包含特殊字符。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("目标地址必须是有效的 IP 地址，且不能包含特殊字符。", "输入无效", MessageBoxImage.Warning, this);
             return;
         }
 
         if (!IsValidPort(connectPortText, out int connectPort))
         {
-            MessageBox.Show(this, "目标端口必须是 1-65535 之间的整数。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("目标端口必须是 1-65535 之间的整数。", "输入无效", MessageBoxImage.Warning, this);
             return;
         }
 
@@ -80,7 +80,7 @@ public partial class PortProxyEditWindow : Window
             && listenIp?.Equals(connectIp) == true
             && listenPort == connectPort)
         {
-            MessageBox.Show(this, "监听地址和端口不能与目标地址和端口相同（防止循环转发）。", "输入无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show("监听地址和端口不能与目标地址和端口相同（防止循环转发）。", "输入无效", MessageBoxImage.Warning, this);
             return;
         }
 

@@ -44,7 +44,7 @@ public partial class PortProxyTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载端口转发规则失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载端口转发规则失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -62,7 +62,7 @@ public partial class PortProxyTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载端口转发规则失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载端口转发规则失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -141,7 +141,7 @@ public partial class PortProxyTab : UserControl
             }
             else
             {
-                MessageBox.Show($"添加失败：{result.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                CopyableMessageBox.Show($"添加失败：{result.Message}", "错误", MessageBoxImage.Error);
             }
         }
     }
@@ -151,7 +151,7 @@ public partial class PortProxyTab : UserControl
         var selected = GetSelected();
         if (selected.Count != 1)
         {
-            MessageBox.Show("请选择一条规则进行修改。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请选择一条规则进行修改。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -177,13 +177,13 @@ public partial class PortProxyTab : UserControl
             });
             if (!delRes.Success)
             {
-                MessageBox.Show($"删除原规则失败：{delRes.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                CopyableMessageBox.Show($"删除原规则失败：{delRes.Message}", "错误", MessageBoxImage.Error);
                 return;
             }
-            if (!delFwRes.Success && !delFwRes.Message.Contains("找不到"))
+            if (!delFwRes.Success && delFwRes.Message.IndexOf("找不到", StringComparison.OrdinalIgnoreCase) < 0)
             {
-                MessageBox.Show($"原端口转发已删除，但旧防火墙规则删除失败：\n{delFwRes.Message}",
-                    "防火墙警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+                CopyableMessageBox.Show($"原端口转发已删除，但旧防火墙规则删除失败：\n{delFwRes.Message}",
+                    "防火墙警告", MessageBoxImage.Warning);
             }
 
             cmdPreview.AppendLine($"netsh interface portproxy add {edited.Direction} listenaddress=\"{edited.ListenAddress}\" listenport=\"{edited.ListenPort}\" connectaddress=\"{edited.ConnectAddress}\" connectport=\"{edited.ConnectPort}\" protocol=\"{edited.Protocol}\"");
@@ -202,7 +202,7 @@ public partial class PortProxyTab : UserControl
             }
             else
             {
-                MessageBox.Show($"添加新规则失败：{addRes.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                CopyableMessageBox.Show($"添加新规则失败：{addRes.Message}", "错误", MessageBoxImage.Error);
                 var (restoreRes, restoreFw) = await Task.Run(() =>
                 {
                     var r = _manager.AddRule(original);
@@ -212,7 +212,7 @@ public partial class PortProxyTab : UserControl
                 if (!restoreRes.Success || !restoreFw.Success)
                 {
                     string details = $"旧规则恢复：{(restoreRes.Success ? "成功" : "失败")}，防火墙：{(restoreFw.Success ? "成功" : "失败")}";
-                    MessageBox.Show($"旧规则可能已丢失。{details}", "严重警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    CopyableMessageBox.Show($"旧规则可能已丢失。{details}", "严重警告", MessageBoxImage.Warning);
                 }
             }
         }
@@ -235,7 +235,7 @@ public partial class PortProxyTab : UserControl
             }
             else
             {
-                MessageBox.Show($"修改失败：{setRes.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                CopyableMessageBox.Show($"修改失败：{setRes.Message}", "错误", MessageBoxImage.Error);
             }
         }
 
@@ -248,7 +248,7 @@ public partial class PortProxyTab : UserControl
         var selected = GetSelected();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择要删除的规则。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择要删除的规则。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -275,8 +275,8 @@ public partial class PortProxyTab : UserControl
 
         if (errors.Count > 0)
         {
-            MessageBox.Show($"成功删除 {ok}/{selected.Count} 条。\n\n失败项：\n{string.Join("\n", errors)}",
-                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show($"成功删除 {ok}/{selected.Count} 条。\n\n失败项：\n{string.Join("\n", errors)}",
+                "操作结果", MessageBoxImage.Warning);
         }
         else
         {
@@ -364,12 +364,12 @@ public partial class PortProxyTab : UserControl
             ConfigExportService.Export(dlg.FileName, config);
 
             var msg = $"已导出 {currentRules.Count} 条端口转发规则到：\n{dlg.FileName}";
-            MessageBox.Show(msg, "导出完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show(msg, "导出完成", MessageBoxImage.Information);
             SetStatus(msg);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -390,7 +390,7 @@ public partial class PortProxyTab : UserControl
 
             if (importedRules.Count == 0)
             {
-                MessageBox.Show("配置文件中未找到端口转发规则数据。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                CopyableMessageBox.Show("配置文件中未找到端口转发规则数据。", "提示", MessageBoxImage.Information);
                 return;
             }
 
@@ -455,7 +455,7 @@ public partial class PortProxyTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"导入失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"导入失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -497,7 +497,7 @@ public partial class PortProxyTab : UserControl
                 continue;
             }
             var delFwRes = _manager.DeleteFirewallRule(old);
-            if (!delFwRes.Success && !delFwRes.Message.Contains("找不到"))
+            if (!delFwRes.Success && delFwRes.Message.IndexOf("找不到", StringComparison.OrdinalIgnoreCase) < 0)
                 warnings.Add($"旧防火墙规则删除失败：{old.ListenAddress}:{old.ListenPort} — {delFwRes.Message}");
 
             var addRes = _manager.AddRule(nw);
@@ -529,12 +529,12 @@ public partial class PortProxyTab : UserControl
         if (errors.Count > 0)
         {
             msg += $"\n\n失败 {errors.Count} 条：\n{string.Join("\n", errors)}";
-            MessageBox.Show(msg, "导入结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show(msg, "导入结果", MessageBoxImage.Warning);
         }
         else
         {
-            MessageBox.Show(msg, warnings.Count > 0 ? "导入完成（有警告）" : "导入完成",
-                MessageBoxButton.OK, warnings.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+            CopyableMessageBox.Show(msg, warnings.Count > 0 ? "导入完成（有警告）" : "导入完成",
+                warnings.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
         }
         SetStatus(msg);
     }

@@ -26,7 +26,7 @@ public partial class DeviceDescriptionTab : UserControl
             SetStatus($"已加载 {_descriptions.Count} 个设备描述");
             EmptyState.Visibility = _descriptions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
-        catch (Exception ex) { MessageBox.Show($"读取设备描述失败：\n{ex.Message}"); }
+        catch (Exception ex) { CopyableMessageBox.Show($"读取设备描述失败：\n{ex.Message}"); }
     }
 
     private List<DeviceDescription> GetSelected() =>
@@ -40,7 +40,7 @@ public partial class DeviceDescriptionTab : UserControl
     private void BtnReset_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected();
-        if (sel.Count == 0) { MessageBox.Show("请先选中至少一个设备描述进行重置。"); return; }
+        if (sel.Count == 0) { CopyableMessageBox.Show("请先选中至少一个设备描述进行重置。"); return; }
         var names = string.Join("\n", sel.Select(d => $"  - {d.Name} ({d.InstanceCountDisplay})"));
         if (MessageBox.Show($"确定要将以下 {sel.Count} 个设备描述重置为单实例？\n\n{names}\n\n重置后需要重新插拔网卡或重启生效。",
             "确认重置", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
@@ -53,7 +53,7 @@ public partial class DeviceDescriptionTab : UserControl
     private void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected();
-        if (sel.Count == 0) { MessageBox.Show("请先选中至少一个设备描述进行删除。"); return; }
+        if (sel.Count == 0) { CopyableMessageBox.Show("请先选中至少一个设备描述进行删除。"); return; }
         var names = string.Join("\n", sel.Select(d => $"  - {d.Name}"));
         if (MessageBox.Show($"确定要删除以下 {sel.Count} 个设备描述条目？\n\n{names}\n\n此操作不可撤销（但可通过备份恢复）。",
             "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;

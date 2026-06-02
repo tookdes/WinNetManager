@@ -25,7 +25,7 @@ public class DnsNrptManager
         string error;
         string output = RunPowerShell(script, out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return rules;
 
         var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -71,7 +71,7 @@ public class DnsNrptManager
         string error;
         string output = RunPowerShell(script, out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return list;
 
         var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -149,7 +149,7 @@ public class DnsNrptManager
         string error;
         RunPowerShell(script, out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return new DnsResult { Success = false, Message = TranslateError(error.Trim()) };
 
         return new DnsResult { Success = true };
@@ -180,7 +180,7 @@ public class DnsNrptManager
         string error;
         RunPowerShell(sb.ToString(), out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return new DnsResult { Success = false, Message = TranslateError(error.Trim()) };
 
         return new DnsResult { Success = true };
@@ -196,7 +196,7 @@ public class DnsNrptManager
         string error;
         RunPowerShell(sb.ToString(), out error);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return new DnsResult { Success = false, Message = TranslateError(error.Trim()) };
 
         return new DnsResult { Success = true };
@@ -207,7 +207,7 @@ public class DnsNrptManager
         string error;
         RunPowerShell("Clear-DnsClientCache", out error, 10000);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return new DnsResult { Success = false, Message = error.Trim() };
 
         return new DnsResult { Success = true };
@@ -220,7 +220,7 @@ public class DnsNrptManager
         string error;
         string output = RunPowerShell(script, out error, 15000);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return new DnsResolveResult { Success = false, Message = error.Trim() };
 
         var records = new List<string>();
@@ -258,14 +258,17 @@ public class DnsNrptManager
 
     private static string TranslateError(string error)
     {
-        if (error.Contains("Access is denied") || error.Contains("拒绝访问") || error.Contains("权限"))
+        if (CI(error, "Access is denied") || CI(error, "拒绝访问") || CI(error, "requires elevation"))
             return "权限不足，需要以管理员身份运行。";
-        if (error.Contains("already exists") || error.Contains("已存在"))
+        if (CI(error, "already exists") || CI(error, "已存在"))
             return "该 NRPT 规则已存在。";
-        if (error.Contains("not found") || error.Contains("找不到"))
+        if (CI(error, "not found") || CI(error, "找不到"))
             return "找不到指定的 NRPT 规则。";
         return error;
     }
+
+    private static bool CI(string source, string value)
+        => source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static string[] ParseCsvLine(string line)
     {

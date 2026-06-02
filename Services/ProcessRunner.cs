@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Xml;
 
 namespace WinNetManager.Services;
 
@@ -87,7 +89,7 @@ public static class ProcessRunner
                 error = $"Process timed out after {timeoutMs} ms.";
                 string timeoutError = errorBuilder.ToString();
                 if (!string.IsNullOrWhiteSpace(timeoutError))
-                    error += Environment.NewLine + timeoutError.Trim();
+                    error += Environment.NewLine + CleanCliXml(timeoutError).Trim();
                 return outputBuilder.ToString();
             }
             else
@@ -96,7 +98,7 @@ public static class ProcessRunner
             }
 
             exitCode = p.ExitCode;
-            error = errorBuilder.ToString();
+            error = CleanCliXml(errorBuilder.ToString());
             return outputBuilder.ToString();
         }
         catch (Exception ex)
@@ -149,5 +151,76 @@ public static class ProcessRunner
     {
         if (string.IsNullOrEmpty(input)) return "";
         return input.Replace("'", "''");
+    }
+
+    /// <summary>
+    /// Cleans PowerShell CLIXML error output into readable text.
+    /// PowerShell writes CLIXML to stderr when -EncodedCommand is used.
+    /// Extracts S[@S='Error'] nodes and decodes _x000D_x000A_ sequences.
+    /// Falls back to regex extraction if XML parsing fails.
+    /// </summary>
+    private static string CleanCliXml(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+
+        // Strip leading "#< CLIXML" line that PowerShell 5.1 prepends
+        raw = Regex.Replace(raw, @"^#\<\s*CLIXML\s*", "", RegexOptions.Multiline).TrimStart();
+
+        if (!raw.Contains("<Objs")) return raw;
+
+        // Try regex extract Error nodes directly (fast and namespace-agnostic)
+        var matches = Regex.Matches(raw, @"<S\s+S=""Error"">([^<]+)</S>");
+        if (matches.Count > 0)
+        {
+            var sb = new StringBuilder();
+            foreach (Match m in matches)
+                sb.AppendLine(DecodeCliXmlChars(m.Groups[1].Value));
+            return sb.ToString().Trim();
+        }
+
+        // Try XML parsing as fallback
+        try
+        {
+            var doc = new XmlDocument();
+            doc.LoadXml(raw);
+            var sb = new StringBuilder();
+            var nsmgr = new XmlNamespaceManager(doc.NameTable);
+            nsmgr.AddNamespace("ps", "http://schemas.microsoft.com/powershell/2004/04");
+            var nodes = doc.SelectNodes("//ps:S[@S='Error']", nsmgr);
+            if (nodes != null)
+            {
+                foreach (XmlNode node in nodes)
+                {
+                    string text = node.InnerText ?? "";
+                    sb.AppendLine(DecodeCliXmlChars(text));
+                }
+            }
+            if (sb.Length > 0) return sb.ToString().Trim();
+        }
+        catch { }
+
+        // Last resort: strip all XML tags
+        return Regex.Replace(raw, @"<[^>]+>", "").Trim();
+    }
+
+    private static string DecodeCliXmlChars(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return "";
+        // Match sequence of encoded chars like _x000D_x000A_ or _x005F_
+        // The pattern matches a leading _x, followed by 4 hex digits, followed by any number of _xHHHH sequences, ending with a trailing _
+        return Regex.Replace(text, @"_x([0-9A-Fa-f]{4}(?:_x[0-9A-Fa-f]{4})*)_", m =>
+        {
+            string inner = m.Groups[1].Value;
+            string[] hexBlocks = inner.Split(new[] { "_x" }, StringSplitOptions.None);
+            var sb = new StringBuilder();
+            foreach (var hex in hexBlocks)
+            {
+                if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out int code))
+                {
+                    sb.Append(code == 0x5F ? "_" : ((char)code).ToString());
+                }
+            }
+            return sb.ToString();
+        });
     }
 }

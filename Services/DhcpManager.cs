@@ -83,7 +83,7 @@ public class DhcpManager
         string error;
         string output = ProcessRunner.RunPowerShell(script, out error, 20000);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return new DhcpResult { Success = false, Message = error.Trim() };
 
         return new DhcpResult { Success = true, Message = "网卡已成功重启。" };
@@ -101,12 +101,15 @@ public class DhcpManager
         return RunIpConfig(command, adapterName, 60000);
     }
 
+    private static bool CI(string source, string value)
+        => source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;
+
     private static DhcpResult RunIpConfig(string command, string adapterName, int timeoutMs)
     {
         string error;
         string output = ProcessRunner.Run("ipconfig.exe", new[] { command, adapterName }, out error, out int exitCode, timeoutMs);
 
-        if (!string.IsNullOrEmpty(error) && !error.Contains("警告"))
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return new DhcpResult { Success = false, Message = error.Trim() };
 
         if (exitCode != 0)

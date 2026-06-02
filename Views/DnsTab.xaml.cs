@@ -47,7 +47,7 @@ public partial class DnsTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载配置失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载配置失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -71,7 +71,7 @@ public partial class DnsTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载配置失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载配置失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -143,7 +143,7 @@ public partial class DnsTab : UserControl
         }
         else
         {
-            MessageBox.Show($"添加失败：{res.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"添加失败：{res.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -152,7 +152,7 @@ public partial class DnsTab : UserControl
         var selected = GetSelected();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择要删除的规则。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择要删除的规则。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -175,8 +175,8 @@ public partial class DnsTab : UserControl
 
         if (errors.Count > 0)
         {
-            MessageBox.Show($"成功删除 {ok}/{selected.Count} 条。\n\n失败项：\n{string.Join("\n", errors)}",
-                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+            CopyableMessageBox.Show($"成功删除 {ok}/{selected.Count} 条。\n\n失败项：\n{string.Join("\n", errors)}",
+                "操作结果", MessageBoxImage.Warning);
         }
         else
         {
@@ -191,7 +191,7 @@ public partial class DnsTab : UserControl
         string domain = TxtResolveDomain.Text?.Trim() ?? "";
         if (string.IsNullOrEmpty(domain))
         {
-            MessageBox.Show("请输入要解析的域名。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请输入要解析的域名。", "提示", MessageBoxImage.Information);
             return;
         }
 
@@ -288,7 +288,7 @@ public partial class DnsTab : UserControl
         var selected = GetSelectedDns();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -315,9 +315,9 @@ public partial class DnsTab : UserControl
 
         if (errors.Count > 0)
         {
-            MessageBox.Show(
+            CopyableMessageBox.Show(
                 $"成功 {selected.Count - errors.Count}/{selected.Count} 个。\n\n失败项：\n{string.Join("\n", errors)}",
-                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "操作结果", MessageBoxImage.Warning);
         }
 
         await RefreshDataAsync();
@@ -329,7 +329,7 @@ public partial class DnsTab : UserControl
         var selected = GetSelectedDns();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -351,9 +351,9 @@ public partial class DnsTab : UserControl
 
         if (errors.Count > 0)
         {
-            MessageBox.Show(
+            CopyableMessageBox.Show(
                 $"成功 {selected.Count - errors.Count}/{selected.Count} 个。\n\n失败项：\n{string.Join("\n", errors)}",
-                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "操作结果", MessageBoxImage.Warning);
         }
 
         await RefreshDataAsync();

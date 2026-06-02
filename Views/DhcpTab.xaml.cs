@@ -36,7 +36,7 @@ public partial class DhcpTab : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"加载网卡信息失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            CopyableMessageBox.Show($"加载网卡信息失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
     }
 
@@ -61,7 +61,7 @@ public partial class DhcpTab : UserControl
         var selected = GetSelected();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -102,9 +102,9 @@ public partial class DhcpTab : UserControl
 
         if (errors.Count > 0)
         {
-            MessageBox.Show(
+            CopyableMessageBox.Show(
                 $"成功提交重启 {successful.Count}/{selected.Count} 个网卡。\n\n失败项：\n{string.Join("\n", errors)}",
-                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "操作结果", MessageBoxImage.Warning);
         }
     }
 
@@ -113,7 +113,7 @@ public partial class DhcpTab : UserControl
         var selected = GetSelected();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxButton.OK, MessageBoxImage.Information);
+            CopyableMessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxImage.Information);
             return;
         }
 
@@ -156,9 +156,9 @@ public partial class DhcpTab : UserControl
 
         if (errors.Count > 0)
         {
-            MessageBox.Show(
+            CopyableMessageBox.Show(
                 $"成功提交 {successful.Count}/{selected.Count} 个网卡。\n\n失败项：\n{string.Join("\n", errors)}",
-                "操作结果", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "操作结果", MessageBoxImage.Warning);
         }
     }
 
