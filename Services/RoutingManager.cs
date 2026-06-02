@@ -148,13 +148,9 @@ public class RoutingManager
         {
             string msg = error.Trim();
             if (msg.Contains("需要提升的权限") || msg.Contains("requires elevation") || msg.Contains("Access is denied"))
-                msg = "错误：需要以管理员身份运行本程序。";
+                msg = "需要以管理员身份运行本程序。";
             else if (msg.Contains("已存在") || msg.Contains("already exists"))
-                msg = "错误：该路由已存在。";
-            else if (msg.Contains("找不到") || msg.Contains("not found") || msg.Contains("No matching"))
-                msg = "错误：找不到指定的路由。";
-            else if (msg.Contains("参数") || msg.Contains("parameter"))
-                msg = "错误：参数无效。请检查目标前缀、下一跳地址和接口名称。";
+                msg = "该路由已存在。";
 
             return new RouteCommandResult { Success = false, Message = msg };
         }
