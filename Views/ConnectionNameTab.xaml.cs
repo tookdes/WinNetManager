@@ -44,7 +44,14 @@ public partial class ConnectionNameTab : UserControl
         var c = sel[0];
         string? n = NetworkProfileTab.PromptInput("重命名连接", $"当前名称: {c.Name}\n请输入新名称:", c.Name);
         if (n == null || n == c.Name) return;
-        try { ConnectionNameService.RenameConnection(c.Guid, n); SetStatus($"已将 \"{c.Name}\" 重命名为 \"{n}\""); RefreshData(); }
+        try
+        {
+            ConnectionNameService.RenameConnection(c.Guid, n);
+            SetStatus($"已将 \"{c.Name}\" 重命名为 \"{n}\"");
+            RefreshData();
+            // 通知其他标签页刷新：它们缓存了旧的 InterfaceAlias，需要重新查询
+            ConnectionNameService.RaiseConnectionsChanged();
+        }
         catch (Exception ex) { CopyableMessageBox.Show($"重命名失败：\n{ex.Message}"); }
     }
 
@@ -59,6 +66,7 @@ public partial class ConnectionNameTab : UserControl
         foreach (var c in sel) { try { ConnectionNameService.DeleteConnection(c.Guid); ok++; } catch { } }
         SetStatus($"已删除 {ok}/{sel.Count} 个连接条目");
         RefreshData();
+        ConnectionNameService.RaiseConnectionsChanged(); // 同上，通知其他标签页
     }
 
     private void MenuCopy_Click(object sender, RoutedEventArgs e) => NetworkProfileTab.CopySelectedCellValue(ConnectionGrid);

@@ -9,6 +9,10 @@ public static class ConnectionNameService
 {
     private const string NetworkClassKeyPath = @"SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}";
 
+    public static event Action? ConnectionsChanged;
+
+    internal static void RaiseConnectionsChanged() => ConnectionsChanged?.Invoke();
+
     public static List<ConnectionInfo> GetAllConnections()
     {
         var connections = new List<ConnectionInfo>();
@@ -40,9 +44,42 @@ public static class ConnectionNameService
         return connections;
     }
 
+    /// <summary>
+    /// 重命名网络连接。
+    /// 必须使用 Rename-NetAdapter 而非直接写注册表：写注册表只改了存储值，
+    /// 网络栈（Get-NetIPInterface / Get-DnsClientServerAddress 等读取的 InterfaceAlias）
+    /// 不会感知变更，导致其他标签页继续显示旧名称。
+    /// Rename-NetAdapter 会通知网络栈同步更新 InterfaceAlias。
+    /// 另外 Get-NetAdapter 不支持 -InterfaceGuid 参数，需先读旧名称按名查找。
+    /// </summary>
     public static void RenameConnection(Guid guid, string newName)
     {
         string keyPath = $@"{NetworkClassKeyPath}\{guid:B}\Connection";
+
+        // 读取旧名称，用于通过 PowerShell 按名查找适配器
+        string oldName = "";
+        using (var readKey = Registry.LocalMachine.OpenSubKey(keyPath))
+            oldName = readKey?.GetValue("Name") as string ?? "";
+
+        // 优先用 Rename-NetAdapter，它会正确通知网络栈更新 InterfaceAlias
+        if (!string.IsNullOrEmpty(oldName))
+        {
+            string safeOld = ProcessRunner.EscapePsSingleQuoted(oldName);
+            string safeNew = ProcessRunner.EscapePsSingleQuoted(newName);
+            string script =
+                $"Get-NetAdapter -Name '{safeOld}' -ErrorAction SilentlyContinue | " +
+                $"Rename-NetAdapter -NewName '{safeNew}'";
+            string error;
+            ProcessRunner.RunPowerShell(script, out error, 15000);
+
+            bool success = string.IsNullOrEmpty(error)
+                || error.IndexOf("警告", StringComparison.OrdinalIgnoreCase) >= 0
+                || error.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (success) return;
+        }
+
+        // 回退：直接写注册表（网络栈不会立即感知，但下次重启后生效）
         using var key = Registry.LocalMachine.OpenSubKey(keyPath, writable: true);
         key?.SetValue("Name", newName);
     }

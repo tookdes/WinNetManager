@@ -13,6 +13,58 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // 连接名称变更后，需要刷新所有使用 InterfaceAlias 的标签页。
+        // 各标签页独立加载数据（Loaded 事件或手动刷新），没有共享数据源，
+        // 所以改名后如果不主动刷新，它们会继续显示内存中的旧名称。
+        ConnectionNameService.ConnectionsChanged += OnConnectionsChanged;
+    }
+
+    private async void OnConnectionsChanged()
+    {
+        // Rename-NetAdapter 通知网络栈后，OS 内部传播需要短暂时间
+        await Task.Delay(500);
+        RefreshTab(DhcpTab);
+        RefreshTab(DnsTab);
+        RefreshTab(MetricTab);
+        RefreshTab(RouteTab);
+    }
+
+    // 各标签页的刷新方法名不统一（RefreshData / LoadData / LoadRoutes），用反射适配
+    private async void RefreshTab(UserControl tab)
+    {
+        try
+        {
+            var mi = tab.GetType().GetMethod("RefreshData",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (mi != null)
+            {
+                if (mi.ReturnType == typeof(Task))
+                    await (Task)mi.Invoke(tab, null)!;
+                else
+                    mi.Invoke(tab, null);
+                return;
+            }
+            mi = tab.GetType().GetMethod("LoadData",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (mi != null)
+            {
+                if (mi.ReturnType == typeof(Task))
+                    await (Task)mi.Invoke(tab, null)!;
+                else
+                    mi.Invoke(tab, null);
+                return;
+            }
+            mi = tab.GetType().GetMethod("LoadRoutes",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (mi != null)
+            {
+                if (mi.ReturnType == typeof(Task))
+                    await (Task)mi.Invoke(tab, null)!;
+                else
+                    mi.Invoke(tab, null);
+            }
+        }
+        catch { }
     }
 
     public void SetStatus(string message)
