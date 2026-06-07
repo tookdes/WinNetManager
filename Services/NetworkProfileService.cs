@@ -38,18 +38,22 @@ public static class NetworkProfileService
         return profiles;
     }
 
-    public static void RenameProfile(Guid guid, string newName)
+    public static bool RenameProfile(Guid guid, string newName)
     {
         string keyPath = $@"{ProfilesKeyPath}\{guid:B}";
         using var key = Registry.LocalMachine.OpenSubKey(keyPath, writable: true);
-        key?.SetValue("ProfileName", newName);
+        if (key == null) return false;
+        key.SetValue("ProfileName", newName);
+        return true;
     }
 
-    public static void SetCategory(Guid guid, NetworkCategory category)
+    public static bool SetCategory(Guid guid, NetworkCategory category)
     {
         string keyPath = $@"{ProfilesKeyPath}\{guid:B}";
         using var key = Registry.LocalMachine.OpenSubKey(keyPath, writable: true);
-        key?.SetValue("Category", (int)category, RegistryValueKind.DWord);
+        if (key == null) return false;
+        key.SetValue("Category", (int)category, RegistryValueKind.DWord);
+        return true;
     }
 
     public static void DeleteProfile(Guid guid)

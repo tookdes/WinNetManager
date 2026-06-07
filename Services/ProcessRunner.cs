@@ -84,7 +84,7 @@ public static class ProcessRunner
             bool exited = p.WaitForExit(timeoutMs);
             if (!exited)
             {
-                try { p.Kill(); p.WaitForExit(5000); } catch { }
+                try { p.Kill(entireProcessTree: true); p.WaitForExit(5000); } catch { }
                 exitCode = -2;
                 error = $"Process timed out after {timeoutMs} ms.";
                 string timeoutError = errorBuilder.ToString();
@@ -206,21 +206,11 @@ public static class ProcessRunner
     private static string DecodeCliXmlChars(string text)
     {
         if (string.IsNullOrEmpty(text)) return "";
-        // Match sequence of encoded chars like _x000D_x000A_ or _x005F_
-        // The pattern matches a leading _x, followed by 4 hex digits, followed by any number of _xHHHH sequences, ending with a trailing _
-        return Regex.Replace(text, @"_x([0-9A-Fa-f]{4}(?:_x[0-9A-Fa-f]{4})*)_", m =>
+        // 逐个匹配 _xHHHH_ 并解码为对应 Unicode 字符
+        return Regex.Replace(text, @"_x([0-9A-Fa-f]{4})_", m =>
         {
-            string inner = m.Groups[1].Value;
-            string[] hexBlocks = inner.Split(new[] { "_x" }, StringSplitOptions.None);
-            var sb = new StringBuilder();
-            foreach (var hex in hexBlocks)
-            {
-                if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out int code))
-                {
-                    sb.Append(code == 0x5F ? "_" : ((char)code).ToString());
-                }
-            }
-            return sb.ToString();
+            int code = Convert.ToInt32(m.Groups[1].Value, 16);
+            return code == 0x5F ? "_" : ((char)code).ToString();
         });
     }
 }

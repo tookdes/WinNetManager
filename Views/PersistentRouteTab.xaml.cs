@@ -13,7 +13,7 @@ using WinNetManager.Services;
 
 namespace WinNetManager.Views;
 
-public partial class PersistentRouteTab : UserControl
+public partial class PersistentRouteTab : UserControl, IRefreshableTab
 {
     private readonly RoutingManager _manager;
     private List<RouteEntry> _allRoutes = new();
@@ -26,6 +26,8 @@ public partial class PersistentRouteTab : UserControl
         _manager = new RoutingManager();
         Loaded += async (_, _) => await LoadRoutesAsync();
     }
+
+    public async Task RefreshAsync() => await LoadRoutesAsync();
 
     private async Task LoadRoutesAsync()
     {
@@ -747,32 +749,7 @@ public partial class PersistentRouteTab : UserControl
     private static string RunPowerShell(string script, out string error, int timeoutMs)
         => ProcessRunner.RunPowerShell(script, out error, timeoutMs);
 
-    private static string[] ParseCsvLine(string line)
-    {
-        var result = new List<string>();
-        var sb = new StringBuilder();
-        bool inQuotes = false;
-
-        for (int i = 0; i < line.Length; i++)
-        {
-            char c = line[i];
-            if (c == '"')
-            {
-                inQuotes = !inQuotes;
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                result.Add(sb.ToString().Trim());
-                sb.Clear();
-            }
-            else
-            {
-                sb.Append(c);
-            }
-        }
-        result.Add(sb.ToString().Trim());
-        return result.ToArray();
-    }
+    private static string[] ParseCsvLine(string line) => CsvParser.ParseLine(line);
 
     // --- 复制 ---
 

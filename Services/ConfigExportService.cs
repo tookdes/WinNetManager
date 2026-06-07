@@ -84,7 +84,15 @@ public static class ConfigExportService
     public static WinNetConfig Import(string filePath)
     {
         string json = File.ReadAllText(filePath);
-        var config = JsonSerializer.Deserialize<WinNetConfig>(json, JsonOptions);
+        WinNetConfig? config;
+        try
+        {
+            config = JsonSerializer.Deserialize<WinNetConfig>(json, JsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"配置文件格式无效：{ex.Message}", ex);
+        }
         if (config == null) return new WinNetConfig();
 
         if (config.Version > SupportedVersion)

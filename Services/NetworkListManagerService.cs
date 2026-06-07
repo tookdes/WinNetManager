@@ -31,9 +31,16 @@ public static class NetworkListManagerService
 
     public static void SetCategoryForConnectedNetwork(Guid networkId, NetworkCategory category)
     {
-        dynamic nlm = NetworkListManagerCom.CreateInstance();
-        dynamic network = nlm.GetNetwork(networkId);
-        network.SetCategory((int)(NLM_NETWORK_CATEGORY)(int)category);
+        try
+        {
+            dynamic nlm = NetworkListManagerCom.CreateInstance();
+            dynamic network = nlm.GetNetwork(networkId);
+            network.SetCategory((int)(NLM_NETWORK_CATEGORY)(int)category);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"无法设置网络类别：{ex.Message}", ex);
+        }
     }
 
     public static List<(Guid NetworkId, string Name, Guid AdapterId)> GetConnectedNetworkDetails()

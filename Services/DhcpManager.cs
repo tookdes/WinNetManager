@@ -15,8 +15,7 @@ public class DhcpManager
         var adapters = new List<NetworkAdapterInfo>();
 
         foreach (var ni in NetworkInterface.GetAllNetworkInterfaces()
-            .Where(n => n.OperationalStatus == OperationalStatus.Up ||
-                       n.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
+            .Where(n => n.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
                        n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
             .OrderBy(n => n.Name))
         {

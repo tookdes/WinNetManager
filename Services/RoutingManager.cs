@@ -138,21 +138,27 @@ public class RoutingManager
 
             foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
             {
+                // IPv6 注册表格式：值名 = "dest/prefixlen"，值数据 = "nexthop,,metric"
+                // PowerShell 输出：dest/prefixlen,nexthop,,metric
                 string entry = line.TrimEnd(',').Trim();
                 var parts = entry.Split(',');
-                if (parts.Length >= 3)
+                if (parts.Length >= 2)
                 {
-                    string dest = parts[0].Trim();
-                    string prefixLen = parts.Length >= 4 ? parts[3].Trim() : "128";
-                    string hop = parts[2].Trim();
+                    string destPart = parts[0].Trim(); // dest/prefixlen
+                    string hop = parts[1].Trim();       // nexthop
+                    string metric = parts.Length >= 4 ? parts[3].Trim() : "1";
+
+                    // destPart 可能已包含 prefixlen（如 "fe80::/10"），也可能是纯地址
+                    string destPrefix = destPart.Contains('/') ? destPart : $"{destPart}/128";
+
                     routes.Add(new RouteEntry
                     {
                         AddressFamily = "IPv6",
-                        DestinationPrefix = $"{dest}/{prefixLen}",
+                        DestinationPrefix = destPrefix,
                         NextHop = hop,
                         InterfaceAlias = "",
                         InterfaceIndex = "",
-                        RouteMetric = "1",
+                        RouteMetric = string.IsNullOrEmpty(metric) ? "1" : metric,
                         Store = "PersistentStore"
                     });
                 }
@@ -254,12 +260,19 @@ public class RoutingManager
         string error;
         string output = RunPowerShell(script, out error);
 
-        string combined = (output + " " + error).Trim();
-        // netsh 成功时输出 "Ok." 或 "确定。"（精确匹配，避免误匹配含 "ok" 的单词）
-        if (combined == "Ok." || combined == "确定。" || combined == "Ok" || combined == "确定")
-            return new RouteCommandResult { Success = true, Message = combined };
+        // netsh 成功时输出 "Ok." 或 "确定。"，按行检查避免多行输出导致精确匹配失败
+        var lines = (output + "\n" + error).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        bool hasOk = lines.Any(l =>
+            l.Trim() == "Ok." || l.Trim() == "确定。" ||
+            l.Trim() == "Ok" || l.Trim() == "确定");
+        bool hasError = !string.IsNullOrWhiteSpace(error)
+            && error.IndexOf("警告", StringComparison.OrdinalIgnoreCase) < 0
+            && error.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) < 0;
 
-        string msg = combined;
+        if (hasOk && !hasError)
+            return new RouteCommandResult { Success = true, Message = output.Trim() };
+
+        string msg = (output + " " + error).Trim();
         if (ContainsIgnoreCase(msg, "Access is denied") || ContainsIgnoreCase(msg, "拒绝访问") || ContainsIgnoreCase(msg, "需要提升的权限"))
             msg = "需要以管理员身份运行本程序。";
         else if (ContainsIgnoreCase(msg, "already exists") || ContainsIgnoreCase(msg, "已存在"))
@@ -269,38 +282,5 @@ public class RoutingManager
     }
 
 
-    private string[] ParseCsvLine(string line)
-    {
-        var result = new List<string>();
-        var sb = new StringBuilder();
-        bool inQuotes = false;
-
-        for (int i = 0; i < line.Length; i++)
-        {
-            char c = line[i];
-            if (c == '"')
-            {
-                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
-                {
-                    sb.Append('"');
-                    i++;
-                }
-                else
-                {
-                    inQuotes = !inQuotes;
-                }
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                result.Add(sb.ToString().Trim());
-                sb.Clear();
-            }
-            else
-            {
-                sb.Append(c);
-            }
-        }
-        result.Add(sb.ToString().Trim());
-        return result.ToArray();
-    }
+    private string[] ParseCsvLine(string line) => CsvParser.ParseLine(line);
 }

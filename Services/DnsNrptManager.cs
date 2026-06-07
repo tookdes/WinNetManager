@@ -270,40 +270,7 @@ public class DnsNrptManager
     private static bool CI(string source, string value)
         => source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;
 
-    private static string[] ParseCsvLine(string line)
-    {
-        var result = new List<string>();
-        var sb = new StringBuilder();
-        bool inQuotes = false;
-
-        for (int i = 0; i < line.Length; i++)
-        {
-            char c = line[i];
-            if (c == '"')
-            {
-                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
-                {
-                    sb.Append('"');
-                    i++;
-                }
-                else
-                {
-                    inQuotes = !inQuotes;
-                }
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                result.Add(sb.ToString().Trim());
-                sb.Clear();
-            }
-            else
-            {
-                sb.Append(c);
-            }
-        }
-        result.Add(sb.ToString().Trim());
-        return result.ToArray();
-    }
+    private static string[] ParseCsvLine(string line) => CsvParser.ParseLine(line);
 }
 
 public class DnsResult

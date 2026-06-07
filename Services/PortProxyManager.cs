@@ -156,8 +156,10 @@ public class PortProxyManager
 
     public static string GetFirewallRuleName(PortProxyRule rule)
     {
-        var safeAddr = (rule.ListenAddress ?? "").Replace("\"", "'");
-        return $"WinNetManager_PortProxy_{safeAddr}_{rule.ListenPort}";
+        // IP 地址已经过 IsValidAddress 验证，但仍需过滤可能的注入字符
+        var safeAddr = (rule.ListenAddress ?? "").Replace("\"", "").Replace("\\", "");
+        var safePort = (rule.ListenPort ?? "").Replace("\"", "").Replace("\\", "");
+        return $"WinNetManager_PortProxy_{safeAddr}_{safePort}";
     }
 
     /// <summary>

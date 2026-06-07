@@ -12,7 +12,7 @@ using WinNetManager.Services;
 
 namespace WinNetManager.Views;
 
-public partial class DnsTab : UserControl
+public partial class DnsTab : UserControl, IRefreshableTab
 {
     private readonly DnsNrptManager _manager = new();
     private readonly ObservableCollection<NrptRule> _rules = new();
@@ -25,6 +25,8 @@ public partial class DnsTab : UserControl
         InitializeComponent();
         Loaded += async (_, _) => await RefreshDataAsync();
     }
+
+    public async Task RefreshAsync() => await RefreshDataAsync();
 
     private async Task RefreshDataAsync()
     {

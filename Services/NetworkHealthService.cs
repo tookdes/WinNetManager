@@ -30,6 +30,9 @@ public static class NetworkHealthService
     {
         var items = new List<NetworkHealthItem>();
 
+        // 批量查询所有服务状态，避免后续每个服务单独启动 PowerShell
+        InitServiceCache();
+
         try { CollectDrivers(items); } catch { }
         try { CollectTun(items); } catch { }
         try { CollectWfpAndHook(items); } catch { }
@@ -136,16 +139,20 @@ public static class NetworkHealthService
             ("tapwindows", "TAP-Windows", "tapwindows.sys", "控制面板 → 程序 → 卸载 TAP-Windows"),
         };
 
+        // 只获取一次，避免每个 TUN 条目重复启动 PowerShell 进程
+        var adapterNames = GetAdapterNames();
+
         foreach (var t in tunNames)
         {
             bool svcExists = ServiceExists(t.svc);
-            bool adapterFound = AdapterNameContains(t.display) || AdapterNameContains(t.svc);
+            bool adapterFound = adapterNames.Any(n =>
+                n.Contains(t.display, StringComparison.OrdinalIgnoreCase) ||
+                n.Contains(t.svc, StringComparison.OrdinalIgnoreCase));
             if (!svcExists && !adapterFound) continue;
 
             bool running = ServiceRunning(t.svc) || IsDriverLoaded(t.svc);
             string st = running ? "运行中" : (svcExists ? "已安装(未运行)" : "检测到适配器");
 
-            // 给出具体的残留位置和卸载方法
             string detail = $"驱动文件：{t.driverFile}  |  服务：{t.svc}。";
             if (!running)
                 detail += $" 如不再使用，卸载方法：{t.uninstall}。";
@@ -160,8 +167,8 @@ public static class NetworkHealthService
             });
         }
 
-        // Generic TAP/TUN adapters
-        var tapAdapters = GetAdapterNames().Where(n =>
+        // Generic TAP/TUN adapters — 复用已获取的列表
+        var tapAdapters = adapterNames.Where(n =>
             n.Contains("TAP", StringComparison.OrdinalIgnoreCase) ||
             n.Contains("TUN", StringComparison.OrdinalIgnoreCase)).ToList();
         foreach (var a in tapAdapters)
@@ -570,35 +577,37 @@ public static class NetworkHealthService
         });
     }
 
-    /// <summary>
-    /// 精确检查服务是否存在 — sc query 做模糊匹配会误报（如查 Wintun 匹配到 WintunHelper），
-    /// 改用 Get-Service 做精确名称匹配。
-    /// </summary>
-    private static bool ServiceExists(string serviceName)
+    // 服务状态缓存 — GetSnapshot 开始时批量查询一次，避免每个服务单独启动 PowerShell
+    private static Dictionary<string, string> _serviceCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static void InitServiceCache()
     {
+        _serviceCache.Clear();
         try
         {
-            string safeName = ProcessRunner.EscapePsSingleQuoted(serviceName);
             string output = ProcessRunner.RunPowerShell(
-                $"Get-Service -Name '{safeName}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name",
-                out _, 5000);
-            return output.Trim().Equals(serviceName, StringComparison.OrdinalIgnoreCase);
+                "Get-Service | Select-Object Name, Status | ConvertTo-Csv -NoTypeInformation",
+                out _, 15000);
+            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 1; i < lines.Length; i++)
+            {
+                var parts = CsvParser.ParseLine(lines[i]);
+                if (parts.Length >= 2)
+                    _serviceCache[parts[0].Trim()] = parts[1].Trim();
+            }
         }
-        catch { return false; }
+        catch { }
     }
 
+    /// <summary>
+    /// 精确检查服务是否存在 — 从批量缓存查询，避免单独启动 PowerShell。
+    /// </summary>
+    private static bool ServiceExists(string serviceName)
+        => _serviceCache.ContainsKey(serviceName);
+
     private static bool ServiceRunning(string serviceName)
-    {
-        try
-        {
-            string safeName = ProcessRunner.EscapePsSingleQuoted(serviceName);
-            string output = ProcessRunner.RunPowerShell(
-                $"Get-Service -Name '{safeName}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status",
-                out _, 5000);
-            return output.Trim().Equals("Running", StringComparison.OrdinalIgnoreCase);
-        }
-        catch { return false; }
-    }
+        => _serviceCache.TryGetValue(serviceName, out var status)
+           && status.Equals("Running", StringComparison.OrdinalIgnoreCase);
 
     private static List<string> GetAdapterNames()
     {
@@ -655,38 +664,5 @@ public static class NetworkHealthService
         catch { return false; }
     }
 
-    private static string[] ParseCsvLine(string line)
-    {
-        var result = new List<string>();
-        var sb = new System.Text.StringBuilder();
-        bool inQuotes = false;
-
-        for (int i = 0; i < line.Length; i++)
-        {
-            char c = line[i];
-            if (c == '"')
-            {
-                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
-                {
-                    sb.Append('"');
-                    i++;
-                }
-                else
-                {
-                    inQuotes = !inQuotes;
-                }
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                result.Add(sb.ToString().Trim());
-                sb.Clear();
-            }
-            else
-            {
-                sb.Append(c);
-            }
-        }
-        result.Add(sb.ToString().Trim());
-        return result.ToArray();
-    }
+    private static string[] ParseCsvLine(string line) => CsvParser.ParseLine(line);
 }

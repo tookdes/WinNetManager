@@ -11,7 +11,7 @@ using WinNetManager.Services;
 
 namespace WinNetManager.Views;
 
-public partial class InterfaceMetricTab : UserControl
+public partial class InterfaceMetricTab : UserControl, IRefreshableTab
 {
     private readonly InterfaceMetricManager _manager = new();
     private List<InterfaceMetricInfo> _allMetrics = new();
@@ -24,6 +24,8 @@ public partial class InterfaceMetricTab : UserControl
         InitializeComponent();
         Loaded += async (_, _) => await LoadDataAsync();
     }
+
+    public async Task RefreshAsync() => await LoadDataAsync();
 
     private async Task LoadDataAsync()
     {

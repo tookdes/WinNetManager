@@ -12,7 +12,7 @@ using WinNetManager.Services;
 
 namespace WinNetManager.Views;
 
-public partial class DhcpTab : UserControl
+public partial class DhcpTab : UserControl, IRefreshableTab
 {
     private readonly DhcpManager _manager = new();
     private readonly ObservableCollection<NetworkAdapterInfo> _adapters = new();
@@ -23,6 +23,8 @@ public partial class DhcpTab : UserControl
         AdapterGrid.ItemsSource = _adapters;
         Loaded += (_, _) => RefreshData();
     }
+
+    public Task RefreshAsync() { RefreshData(); return Task.CompletedTask; }
 
     private void RefreshData()
     {

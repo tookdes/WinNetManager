@@ -29,42 +29,10 @@ public partial class MainWindow : Window
         RefreshTab(RouteTab);
     }
 
-    // 各标签页的刷新方法名不统一（RefreshData / LoadData / LoadRoutes），用反射适配
     private async void RefreshTab(UserControl tab)
     {
-        try
-        {
-            var mi = tab.GetType().GetMethod("RefreshData",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (mi != null)
-            {
-                if (mi.ReturnType == typeof(Task))
-                    await (Task)mi.Invoke(tab, null)!;
-                else
-                    mi.Invoke(tab, null);
-                return;
-            }
-            mi = tab.GetType().GetMethod("LoadData",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (mi != null)
-            {
-                if (mi.ReturnType == typeof(Task))
-                    await (Task)mi.Invoke(tab, null)!;
-                else
-                    mi.Invoke(tab, null);
-                return;
-            }
-            mi = tab.GetType().GetMethod("LoadRoutes",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (mi != null)
-            {
-                if (mi.ReturnType == typeof(Task))
-                    await (Task)mi.Invoke(tab, null)!;
-                else
-                    mi.Invoke(tab, null);
-            }
-        }
-        catch { }
+        if (tab is IRefreshableTab r)
+            await r.RefreshAsync();
     }
 
     public void SetStatus(string message)

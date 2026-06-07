@@ -125,17 +125,21 @@ public class RouteEntry : INotifyPropertyChanged
             return destination;
 
         int prefixLength = 0;
+        bool done = false;
         foreach (byte b in maskBytes)
         {
+            if (done) break;
             for (int i = 7; i >= 0; i--)
             {
                 if ((b & (1 << i)) != 0)
                     prefixLength++;
                 else
-                    goto done;
+                {
+                    done = true;
+                    break;
+                }
             }
         }
-    done:
 
         byte[] networkBytes = new byte[4];
         for (int i = 0; i < 4; i++)

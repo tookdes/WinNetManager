@@ -57,7 +57,11 @@ public partial class NetworkProfileTab : UserControl
         if (n == null || n == p.ProfileName) return;
         try
         {
-            NetworkProfileService.RenameProfile(p.Guid, n);
+            if (!NetworkProfileService.RenameProfile(p.Guid, n))
+            {
+                CopyableMessageBox.Show("重命名失败：找不到注册表键。");
+                return;
+            }
             SetStatus($"已将 \"{p.ProfileName}\" 重命名为 \"{n}\"");
             RefreshData();
         }

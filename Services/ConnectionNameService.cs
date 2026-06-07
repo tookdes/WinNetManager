@@ -1,5 +1,4 @@
 using System.Net.NetworkInformation;
-using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using WinNetManager.Models;
 
@@ -110,11 +109,6 @@ public static class ConnectionNameService
         return guids;
     }
 
-    [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
-    private static extern int StrCmpLogicalW(string psz1, string psz2);
-
     private static int NaturalStringCompare(string a, string b)
-    {
-        return StrCmpLogicalW(a ?? "", b ?? "");
-    }
+        => NaturalStringComparer.CompareStrings(a ?? "", b ?? "");
 }
