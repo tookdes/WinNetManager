@@ -235,6 +235,17 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
         if (toDelete.Count == 0 && toModify.Count == 0 && toAdd.Count == 0)
             return;
 
+        var validationErrors = toModify.Concat(toAdd)
+            .Select(r => (Route: r, IsValid: RoutingManager.ValidateRoute(r, out string err), Error: err))
+            .Where(x => !x.IsValid)
+            .Select(x => $"{x.Route.DestinationDisplay}: {x.Error}")
+            .ToList();
+        if (validationErrors.Count > 0)
+        {
+            CopyableMessageBox.Show("Invalid routes detected. Apply was stopped:\n\n" + string.Join("\n", validationErrors), "Invalid Input", MessageBoxImage.Warning);
+            return;
+        }
+
         var sb = new StringBuilder();
         sb.AppendLine("即将执行以下操作：\n");
 
@@ -518,10 +529,17 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
 
             var toAdd = new List<RouteEntry>();
             var toModify = new List<(RouteEntry Existing, RouteEntry New)>();
+            var invalidRoutes = new List<string>();
             int skipped = 0;
 
             foreach (var imported in importedRoutes)
             {
+                if (!RoutingManager.ValidateRoute(imported, out string validationError))
+                {
+                    invalidRoutes.Add($"{imported.DestinationPrefix} via {imported.NextHop}: {validationError}");
+                    continue;
+                }
+
                 var exactMatch = _allRoutes.FirstOrDefault(r => AreEqual(r, imported));
                 if (exactMatch != null)
                 {
@@ -542,6 +560,12 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
 
             if (toAdd.Count == 0 && toModify.Count == 0)
             {
+                if (invalidRoutes.Count > 0)
+                {
+                    CopyableMessageBox.Show($"No valid routes were found in the config file.\n\nInvalid items:\n{string.Join("\n", invalidRoutes)}", "Import Failed", MessageBoxImage.Warning);
+                    return;
+                }
+
                 CopyableMessageBox.Show($"配置文件中所有 {skipped} 条路由均已存在，无需导入。", "提示", MessageBoxImage.Information);
                 return;
             }
@@ -569,6 +593,14 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
                     sb.AppendLine($"  • {old.DestinationDisplay} via {old.NextHop}");
                     sb.AppendLine($"    → {nw.DestinationDisplay} via {nw.NextHop} (接口: {nw.InterfaceAlias}, 度量: {nw.RouteMetric})");
                 }
+                sb.AppendLine();
+            }
+
+            if (invalidRoutes.Count > 0)
+            {
+                sb.AppendLine($"Invalid items skipped: {invalidRoutes.Count}");
+                foreach (var item in invalidRoutes)
+                    sb.AppendLine($"  - {item}");
                 sb.AppendLine();
             }
 

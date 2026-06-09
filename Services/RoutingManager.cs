@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using WinNetManager.Models;
 
@@ -22,8 +24,104 @@ public class NetInterface
 
 public class RoutingManager
 {
+    private static readonly string[] ValidAddressFamilies = { "IPv4", "IPv6" };
+
     private string RunPowerShell(string script, out string error, int timeoutMs = 30000)
         => ProcessRunner.RunPowerShell(script, out error, timeoutMs);
+
+    public static bool ValidateRoute(RouteEntry route, out string error)
+    {
+        error = "";
+        if (route == null)
+        {
+            error = "路由为空。";
+            return false;
+        }
+
+        string family = route.AddressFamily?.Trim() ?? "";
+        if (!ValidAddressFamilies.Contains(family, StringComparer.OrdinalIgnoreCase))
+        {
+            error = "地址族必须为 IPv4 或 IPv6。";
+            return false;
+        }
+
+        route.AddressFamily = family.Equals("IPv6", StringComparison.OrdinalIgnoreCase) ? "IPv6" : "IPv4";
+
+        if (!IsValidDestinationPrefix(route.DestinationPrefix, route.AddressFamily))
+        {
+            error = route.AddressFamily == "IPv6"
+                ? "目标前缀必须是有效的 IPv6 CIDR，例如 2400::/48。"
+                : "目标前缀必须是有效的 IPv4 CIDR，例如 192.168.1.0/24。";
+            return false;
+        }
+
+        if (!IPAddress.TryParse(route.NextHop?.Trim(), out var nextHop))
+        {
+            error = "下一跳必须是有效 IP 地址。";
+            return false;
+        }
+
+        if (route.AddressFamily == "IPv4" && nextHop.AddressFamily != AddressFamily.InterNetwork)
+        {
+            error = "IPv4 路由的下一跳必须是 IPv4 地址。";
+            return false;
+        }
+
+        if (route.AddressFamily == "IPv6" && nextHop.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            error = "IPv6 路由的下一跳必须是 IPv6 地址。";
+            return false;
+        }
+
+        route.NextHop = nextHop.ToString();
+
+        string alias = route.InterfaceAlias?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(alias) || ContainsControlChars(alias))
+        {
+            error = "接口别名不能为空，且不能包含控制字符。";
+            return false;
+        }
+        route.InterfaceAlias = alias;
+
+        if (!int.TryParse(route.RouteMetric?.Trim(), out int metric) || metric < 0 || metric > 999999)
+        {
+            error = "度量值必须是 0 到 999999 之间的整数。";
+            return false;
+        }
+        route.RouteMetric = metric.ToString();
+
+        return true;
+    }
+
+    private static bool IsValidDestinationPrefix(string? prefix, string family)
+    {
+        if (string.IsNullOrWhiteSpace(prefix)) return false;
+
+        string trimmed = prefix.Trim();
+        int slashIndex = trimmed.LastIndexOf('/');
+        if (slashIndex <= 0 || slashIndex == trimmed.Length - 1) return false;
+
+        string addressPart = trimmed[..slashIndex];
+        string prefixPart = trimmed[(slashIndex + 1)..];
+        if (!IPAddress.TryParse(addressPart, out var ip)) return false;
+        if (!int.TryParse(prefixPart, out int prefixLength)) return false;
+
+        if (family == "IPv4")
+        {
+            if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
+            if (prefixLength < 0 || prefixLength > 32) return false;
+        }
+        else
+        {
+            if (ip.AddressFamily != AddressFamily.InterNetworkV6) return false;
+            if (prefixLength < 0 || prefixLength > 128) return false;
+        }
+
+        return true;
+    }
+
+    private static bool ContainsControlChars(string value)
+        => value.Any(char.IsControl);
 
     public List<RouteEntry> GetPersistentRoutes(string? addressFamily = null)
     {
@@ -225,6 +323,9 @@ public class RoutingManager
 
     public RouteCommandResult AddRoute(RouteEntry route)
     {
+        if (!ValidateRoute(route, out string validationError))
+            return new RouteCommandResult { Success = false, Message = validationError };
+
         string prefix = route.DestinationPrefix ?? "";
         string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
         string safeHop = ProcessRunner.EscapePsSingleQuoted(route.NextHop);
@@ -241,6 +342,9 @@ public class RoutingManager
 
     public RouteCommandResult DeleteRoute(RouteEntry route)
     {
+        if (!ValidateRoute(route, out string validationError))
+            return new RouteCommandResult { Success = false, Message = validationError };
+
         string prefix = route.DestinationPrefix ?? "";
         string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
         string safeHop = ProcessRunner.EscapePsSingleQuoted(route.NextHop);

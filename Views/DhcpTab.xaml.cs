@@ -21,31 +21,32 @@ public partial class DhcpTab : UserControl, IRefreshableTab
     {
         InitializeComponent();
         AdapterGrid.ItemsSource = _adapters;
-        Loaded += (_, _) => RefreshData();
+        Loaded += async (_, _) => await RefreshDataAsync();
     }
 
-    public Task RefreshAsync() { RefreshData(); return Task.CompletedTask; }
+    public async Task RefreshAsync() => await RefreshDataAsync();
 
-    private void RefreshData()
+    private async Task RefreshDataAsync()
     {
         try
         {
+            var adapters = await Task.Run(() => _manager.GetAdapters());
             _adapters.Clear();
-            foreach (var a in _manager.GetAdapters())
+            foreach (var a in adapters)
                 _adapters.Add(a);
-            SetStatus($"已加载 {_adapters.Count} 个网卡");
+            SetStatus($"Loaded {_adapters.Count} adapters");
             EmptyState.Visibility = _adapters.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (Exception ex)
         {
-            CopyableMessageBox.Show($"加载网卡信息失败：{ex.Message}", "错误", MessageBoxImage.Error);
+            CopyableMessageBox.Show($"Failed to load adapter information: {ex.Message}", "Error", MessageBoxImage.Error);
         }
     }
 
     private List<NetworkAdapterInfo> GetSelected() =>
         AdapterGrid.SelectedItems.Cast<NetworkAdapterInfo>().ToList();
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshDataAsync();
 
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => AdapterGrid.SelectAll();
 
@@ -167,11 +168,8 @@ public partial class DhcpTab : UserControl, IRefreshableTab
     private async Task AutoRefreshAfterDelay(int delayMs)
     {
         await Task.Delay(delayMs);
-        await Dispatcher.InvokeAsync(() =>
-        {
-            RefreshData();
-            SetStatus("网卡信息已自动刷新");
-        });
+        await RefreshDataAsync();
+        SetStatus("Adapter information refreshed automatically");
     }
 
     private void MenuCopy_Click(object sender, RoutedEventArgs e) =>
