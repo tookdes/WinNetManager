@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using WinNetManager.Interop;
 using WinNetManager.Models;
@@ -58,6 +59,19 @@ public static class GhostAdapterService
         }
 
         return adapters;
+    }
+
+    public static void OpenDeviceProperties(string deviceInstanceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceInstanceId))
+            throw new ArgumentException("设备实例 ID 不能为空。", nameof(deviceInstanceId));
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "rundll32.exe",
+            Arguments = $"devmgr.dll,DeviceProperties_RunDLL /DeviceID \"{deviceInstanceId}\"",
+            UseShellExecute = true
+        });
     }
 
     public static bool RemoveDevice(string deviceInstanceId)

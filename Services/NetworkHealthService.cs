@@ -42,6 +42,7 @@ public static class NetworkHealthService
         try { CollectServices(items); } catch { }
         try { CollectDns(items); } catch { }
         try { CollectHosts(items); } catch { }
+        try { CollectIpConfig(items); } catch { }
 
         // Risk-sort: Danger > Warn > Info > None
         var order = new Dictionary<string, int> { ["Danger"] = 0, ["Warn"] = 1, ["Info"] = 2, ["None"] = 3 };
@@ -556,6 +557,156 @@ public static class NetworkHealthService
                         : "可在「DNS」标签页的 Hosts 快捷按钮打开编辑。",
                     Risk = activeRules > 10 ? "Warn" : "Info"
                 });
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 全面检查已连接适配器的 IP 配置健康状态。
+    /// 检查项：APIPA 地址、缺少网关、缺少 DNS、DHCP 失败、多网关冲突等。
+    /// </summary>
+    private static void CollectIpConfig(List<NetworkHealthItem> items)
+    {
+        try
+        {
+            var adapters = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces();
+            foreach (var ni in adapters)
+            {
+                if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Ethernet &&
+                    ni.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211 &&
+                    ni.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.GigabitEthernet)
+                    continue;
+
+                var props = ni.GetIPProperties();
+
+                // --- IPv4 检查 ---
+                var ipv4Addrs = props.UnicastAddresses
+                    .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    .ToList();
+
+                if (ipv4Addrs.Count == 0)
+                {
+                    // 已连接但无 IPv4 地址 — DHCP 可能失败
+                    items.Add(new NetworkHealthItem
+                    {
+                        Category = "IP 配置",
+                        Name = $"{ni.Name} 无 IPv4 地址",
+                        Status = "未分配",
+                        Detail = "适配器已连接但没有 IPv4 地址，可能是 DHCP 服务器不可达或未配置静态 IP。",
+                        Risk = "Warn"
+                    });
+                    continue; // 无 IP 则后续检查无意义
+                }
+
+                foreach (var ipv4 in ipv4Addrs)
+                {
+                    // APIPA 地址 (169.254.x.x) — DHCP 失败的明确信号
+                    byte[] bytes = ipv4.Address.GetAddressBytes();
+                    if (bytes.Length == 4 && bytes[0] == 169 && bytes[1] == 254)
+                    {
+                        items.Add(new NetworkHealthItem
+                        {
+                            Category = "IP 配置",
+                            Name = $"{ni.Name} DHCP 失败",
+                            Status = $"APIPA: {ipv4.Address}",
+                            Detail = "系统分配了 169.254.x.x 自组网地址，说明 DHCP 服务器不可达。请检查网线连接和 DHCP 服务。",
+                            Risk = "Warn"
+                        });
+                    }
+
+                    // 环回地址误配到物理适配器（不太可能但应检查）
+                    if (ipv4.Address.Equals(System.Net.IPAddress.Loopback))
+                    {
+                        items.Add(new NetworkHealthItem
+                        {
+                            Category = "IP 配置",
+                            Name = $"{ni.Name} 配置了环回地址",
+                            Status = "127.0.0.1",
+                            Detail = "物理适配器不应配置环回地址。",
+                            Risk = "Warn"
+                        });
+                    }
+                }
+
+                // 网关检查
+                var v4Gateways = props.GatewayAddresses
+                    .Where(g => g.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork &&
+                                !g.Address.Equals(System.Net.IPAddress.Any))
+                    .ToList();
+
+                if (v4Gateways.Count == 0)
+                {
+                    items.Add(new NetworkHealthItem
+                    {
+                        Category = "IP 配置",
+                        Name = $"{ni.Name} 缺少 IPv4 网关",
+                        Status = $"IP: {ipv4Addrs[0].Address}",
+                        Detail = "已分配 IP 但未设置默认网关，将无法访问本地子网以外的网络。请在「IP 配置」标签页检查 DHCP 或手动配置。",
+                        Risk = "Warn"
+                    });
+                }
+
+                // DNS 检查
+                var dnsServers = props.DnsAddresses
+                    .Where(d => d.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    .ToList();
+
+                if (dnsServers.Count == 0)
+                {
+                    items.Add(new NetworkHealthItem
+                    {
+                        Category = "IP 配置",
+                        Name = $"{ni.Name} 未配置 DNS",
+                        Status = "无 DNS 服务器",
+                        Detail = "未设置 DNS 服务器，域名将无法解析。DHCP 应自动分配 DNS，请检查 DHCP 配置或手动设置。",
+                        Risk = "Warn"
+                    });
+                }
+                else
+                {
+                    // 检查是否使用了不常见/可能有问题的 DNS
+                    var loopbackDns = dnsServers.Where(d => d.Equals(System.Net.IPAddress.Loopback) || d.Equals(System.Net.IPAddress.IPv6Loopback)).ToList();
+                    if (loopbackDns.Count == dnsServers.Count)
+                    {
+                        items.Add(new NetworkHealthItem
+                        {
+                            Category = "IP 配置",
+                            Name = $"{ni.Name} DNS 仅指向本机",
+                            Status = string.Join(", ", dnsServers.Select(d => d.ToString())),
+                            Detail = "所有 DNS 服务器均指向 127.0.0.1 / ::1，需确认本机是否有 DNS 服务在运行，否则域名解析将失败。",
+                            Risk = "Info"
+                        });
+                    }
+                }
+
+                // --- IPv6 检查 ---
+                if (ni.Supports(System.Net.NetworkInformation.NetworkInterfaceComponent.IPv6))
+                {
+                    var ipv6Global = props.UnicastAddresses
+                        .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+                                  && !a.Address.IsIPv6LinkLocal)
+                        .ToList();
+
+                    var ipv6Dns = props.DnsAddresses
+                        .Where(d => d.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+                                  && !d.IsIPv6LinkLocal)
+                        .ToList();
+
+                    // 有 IPv6 全局地址但无 IPv6 DNS
+                    if (ipv6Global.Count > 0 && ipv6Dns.Count == 0)
+                    {
+                        items.Add(new NetworkHealthItem
+                        {
+                            Category = "IP 配置",
+                            Name = $"{ni.Name} IPv6 无 DNS",
+                            Status = $"有 {ipv6Global.Count} 个全局 IPv6 地址",
+                            Detail = "已分配全局 IPv6 地址但未配置 IPv6 DNS 服务器，IPv6 域名解析可能失败。",
+                            Risk = "Info"
+                        });
+                    }
+                }
             }
         }
         catch { }

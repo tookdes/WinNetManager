@@ -38,6 +38,51 @@ public partial class GhostAdapterTab : UserControl
     private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.InvertSelection(AdapterGrid, _adapters);
 
+    private void BtnProperties_Click(object sender, RoutedEventArgs e) => OpenSelectedProperties();
+
+    private void AdapterGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != System.Windows.Input.MouseButton.Left) return;
+        OpenSelectedProperties();
+    }
+
+    private void OpenSelectedProperties()
+    {
+        var sel = GetSelected();
+        if (sel.Count == 0)
+        {
+            CopyableMessageBox.Show("请先选中一个网卡设备。", "未选择", MessageBoxImage.Information);
+            return;
+        }
+        if (sel.Count > 1)
+        {
+            CopyableMessageBox.Show("请只选中一个网卡设备打开属性。", "多选", MessageBoxImage.Information);
+            return;
+        }
+
+        var adapter = sel[0];
+        if (string.IsNullOrWhiteSpace(adapter.DeviceInstanceId))
+        {
+            CopyableMessageBox.Show("该设备缺少实例 ID，无法打开属性。", "错误", MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            GhostAdapterService.OpenDeviceProperties(adapter.DeviceInstanceId);
+            SetStatus($"已打开「{adapter.FriendlyName}」的设备属性");
+            if (Window.GetWindow(this) is MainWindow mw)
+            {
+                mw.SetCommandPreview(
+                    $"rundll32.exe devmgr.dll,DeviceProperties_RunDLL /DeviceID \"{adapter.DeviceInstanceId}\"");
+            }
+        }
+        catch (Exception ex)
+        {
+            CopyableMessageBox.Show($"打开设备属性失败：\n{ex.Message}", "错误", MessageBoxImage.Error);
+        }
+    }
+
     private void BtnRemove_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected().Where(a => !a.IsPresent).ToList();

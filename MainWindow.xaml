@@ -46,7 +46,7 @@
             <TabItem Header="设备描述">
                 <views:DeviceDescriptionTab x:Name="DescriptionTab" />
             </TabItem>
-            <TabItem Header="幽灵网卡">
+            <TabItem Header="网卡设备">
                 <views:GhostAdapterTab x:Name="GhostTab" />
             </TabItem>
             <TabItem Header="持久路由">
