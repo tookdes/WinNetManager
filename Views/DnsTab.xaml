@@ -7,13 +7,13 @@
             <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
             <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
             <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="修改网卡 DNS" Padding="12,4" Margin="6,0,0,0" Click="BtnEditDns_Click"/>
             <Button Content="设为自动获取" Padding="12,4" Margin="6,0,0,0" Click="BtnAutoDns_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="新建 NRPT 规则" Padding="12,4" Margin="6,0,0,0" Click="BtnAdd_Click"/>
-            <Button Content="删除 NRPT" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnDelete_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Button Content="删除 NRPT" Padding="12,4" Margin="6,0,0,0" Foreground="{DynamicResource DangerBrush}" Click="BtnDelete_Click"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <ComboBox x:Name="CmbAddressFamily" Width="52" Padding="2,2" Margin="4,0,0,0"
                       VerticalContentAlignment="Center" SelectionChanged="CmbAddressFamily_SelectionChanged">
                 <ComboBoxItem Content="全部" Tag="" IsSelected="True"/>
@@ -41,10 +41,10 @@
                                  ToolTip="输入域名，如 github.com 或 gitlab.corp.local"/>
                         <Button Content="解析" Padding="12,4" Margin="6,0,0,0" Click="BtnResolve_Click"/>
                     </StackPanel>
-                    <TextBlock DockPanel.Dock="Top" FontSize="11" Foreground="Gray" Margin="0,0,0,4"
+                    <TextBlock DockPanel.Dock="Top" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,4"
                                Text="使用 Resolve-DnsName 解析域名，显示 A/AAAA/CNAME 记录。"/>
                     <TextBox x:Name="TxtResolveResult" IsReadOnly="True" Height="60"
-                             Background="#F8F8F8" FontFamily="Consolas" FontSize="12"
+                             Background="{DynamicResource ResultBoxBgBrush}" FontFamily="Consolas" FontSize="12"
                              TextWrapping="Wrap" VerticalScrollBarVisibility="Auto">
                         <TextBox.ContextMenu>
                             <ContextMenu>
@@ -59,7 +59,7 @@
             <!-- DNS 缓存刷新 -->
             <GroupBox Grid.Column="2" Header="DNS 缓存管理">
                 <StackPanel Margin="12">
-                    <TextBlock FontSize="11" Foreground="Gray" TextWrapping="Wrap"
+                    <TextBlock FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
                                Text="Windows 会缓存 DNS 解析结果以提高速度，但缓存可能导致域名 IP 变更后仍返回旧地址。"/>
                     <Button Content="刷新 DNS 缓存" Padding="12,4" Margin="0,12,0,0" HorizontalAlignment="Left"
                             Click="BtnFlushDns_Click" ToolTip="执行 Clear-DnsClientCache"/>
@@ -78,13 +78,12 @@
 
             <DockPanel Grid.Row="0" Margin="0,0,0,4">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                    <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="Gray" Text="常规网卡 DNS (Interface DNS)"/>
-                    <TextBlock x:Name="TbkDnsCount" DockPanel.Dock="Right" FontSize="11" Foreground="Gray" HorizontalAlignment="Right"/>
+                    <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Text="常规网卡 DNS (Interface DNS)"/>
+                    <TextBlock x:Name="TbkDnsCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" HorizontalAlignment="Right"/>
                 </DockPanel>
                 <DataGrid x:Name="InterfaceDnsGrid" AutoGenerateColumns="False" CanUserAddRows="False"
                           IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                          HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
-                          ColumnWidth="Auto" Sorting="Grid_Sorting">
+                          HeadersVisibility="Column"                           ColumnWidth="Auto" Sorting="Grid_Sorting">
                     <DataGrid.Columns>
                         <DataGridTextColumn Binding="{Binding InterfaceAlias}" Width="200" Header="网卡名称"/>
                         <DataGridTextColumn Binding="{Binding AddressFamily}" Width="80" Header="协议"/>
@@ -106,14 +105,13 @@
 
             <DockPanel Grid.Row="2" Margin="0,4,0,0">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                    <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="Gray" Text="高级名称解析策略表 (NRPT)"/>
-                    <TextBlock x:Name="TbkNrptCount" DockPanel.Dock="Right" FontSize="11" Foreground="Gray" HorizontalAlignment="Right"/>
+                    <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Text="高级名称解析策略表 (NRPT)"/>
+                    <TextBlock x:Name="TbkNrptCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" HorizontalAlignment="Right"/>
                 </DockPanel>
                 <Grid>
                     <DataGrid x:Name="NrptGrid" AutoGenerateColumns="False" CanUserAddRows="False"
                               IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                              HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
-                              ColumnWidth="Auto" Sorting="Grid_Sorting">
+                              HeadersVisibility="Column"                               ColumnWidth="Auto" Sorting="Grid_Sorting">
                         <DataGrid.Columns>
                             <DataGridTextColumn Binding="{Binding Namespace}" Width="200" Header="域名后缀"/>
                             <DataGridTextColumn Binding="{Binding NameServers}" Width="200" Header="DNS 服务器"/>
@@ -123,16 +121,16 @@
                         <DataGrid.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="新建 NRPT 规则" Click="BtnAdd_Click"/>
-                                <MenuItem Header="删除 NRPT" Click="BtnDelete_Click" Foreground="Red"/>
+                                <MenuItem Header="删除 NRPT" Click="BtnDelete_Click" Foreground="{DynamicResource DangerBrush}"/>
                                 <Separator/>
                                 <MenuItem Header="复制选中值" Click="MenuCopyNrpt_Click"/>
                             </ContextMenu>
                         </DataGrid.ContextMenu>
                     </DataGrid>
-                    <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+                    <Border x:Name="EmptyState" Background="{DynamicResource EmptyStateBgBrush}" Visibility="Collapsed">
                         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <TextBlock Text="&#x1F310;" FontSize="36" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
-                            <TextBlock Text="暂无 NRPT 规则" FontSize="14" Foreground="#666" HorizontalAlignment="Center" Margin="0,8,0,2" FontWeight="SemiBold"/>
+                            <TextBlock Text="&#x1F310;" FontSize="36" HorizontalAlignment="Center" Foreground="{DynamicResource EmptyIconBrush}" FontFamily="Segoe UI Emoji"/>
+                            <TextBlock Text="暂无 NRPT 规则" FontSize="14" Foreground="{DynamicResource EmptyTitleBrush}" HorizontalAlignment="Center" Margin="0,8,0,2" FontWeight="SemiBold"/>
                             <Button Content="新建 NRPT 规则" Padding="12,3" Margin="0,10,0,0" HorizontalAlignment="Center" Click="BtnAdd_Click"/>
                         </StackPanel>
                     </Border>

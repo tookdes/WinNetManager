@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
-using System.Net;
 using System.Net.NetworkInformation;
+using System.Text;
 using WinNetManager.Models;
 
 namespace WinNetManager.Services;
@@ -20,39 +19,55 @@ public class DhcpManager
             .OrderBy(n => n.Name))
         {
             var props = ni.GetIPProperties();
-            var ipv4Addrs = props.UnicastAddresses
+            var ipv4Infos = props.UnicastAddresses
                 .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                .Select(a => a.Address.ToString())
                 .ToList();
             var ipv6Addrs = props.UnicastAddresses
                 .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && !a.Address.IsIPv6LinkLocal)
                 .Select(a => a.Address.ToString())
                 .ToList();
 
+            var gateways = props.GatewayAddresses
+                .Where(g => g.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                .Select(g => g.Address.ToString())
+                .Distinct()
+                .ToList();
+
+            string prefix = "";
+            if (ipv4Infos.Count > 0)
+                prefix = ipv4Infos[0].PrefixLength.ToString();
+
             adapters.Add(new NetworkAdapterInfo
             {
                 Name = ni.Name,
                 Description = ni.Description,
                 Status = ni.OperationalStatus.ToString(),
-                MacAddress = ni.GetPhysicalAddress().ToString(),
-                IPv4Address = string.Join(", ", ipv4Addrs),
+                MacAddress = FormatMac(ni.GetPhysicalAddress().ToString()),
+                IPv4Address = string.Join(", ", ipv4Infos.Select(a => a.Address.ToString())),
                 IPv6Address = string.Join(", ", ipv6Addrs),
-                DhcpEnabled = ipv4Addrs.Count > 0 && props.GetIPv4Properties()?.IsDhcpEnabled == true,
+                Gateway = string.Join(", ", gateways),
+                PrefixLength = prefix,
+                DhcpEnabled = ipv4Infos.Count > 0 && props.GetIPv4Properties()?.IsDhcpEnabled == true,
             });
         }
 
         return adapters;
     }
 
-    /// <summary>
-    /// 链式执行 release + renew，确保即使当前网络会话断开，后台进程仍能完成操作。
-    /// </summary>
+    private static string FormatMac(string raw)
+    {
+        if (string.IsNullOrEmpty(raw) || raw.Length != 12) return raw;
+        var sb = new StringBuilder(17);
+        for (int i = 0; i < 12; i += 2)
+        {
+            if (i > 0) sb.Append('-');
+            sb.Append(raw, i, 2);
+        }
+        return sb.ToString();
+    }
+
     private static string QuotePreviewArg(string arg) => $"\"{arg.Replace("\"", "\"\"")}\"";
 
-    /// <summary>
-    /// Returns a human-readable command preview for Release+Renew.
-    /// This is for display only; the actual execution uses ProcessRunner.
-    /// </summary>
     public static string GetReleaseRenewCommandPreview(string adapterName, bool ipv6)
     {
         string releaseCmd = ipv6
@@ -80,12 +95,81 @@ public class DhcpManager
     {
         string script = $"Restart-NetAdapter -Name '{ProcessRunner.EscapePsSingleQuoted(adapterName)}' -Confirm:$false";
         string error;
-        string output = ProcessRunner.RunPowerShell(script, out error, 20000);
+        ProcessRunner.RunPowerShell(script, out error, 20000);
 
         if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
             return new DhcpResult { Success = false, Message = error.Trim() };
 
         return new DhcpResult { Success = true, Message = "网卡已成功重启。" };
+    }
+
+    public static string GetSetStaticCommandPreview(string adapterName, string ip, int prefixLength, string? gateway)
+    {
+        string alias = ProcessRunner.EscapePsSingleQuoted(adapterName);
+        var sb = new StringBuilder();
+        sb.AppendLine($"Set-NetIPInterface -InterfaceAlias '{alias}' -AddressFamily IPv4 -Dhcp Disabled");
+        sb.AppendLine($"Get-NetIPAddress -InterfaceAlias '{alias}' -AddressFamily IPv4 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false");
+        sb.AppendLine($"Get-NetRoute -InterfaceAlias '{alias}' -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false");
+        if (string.IsNullOrWhiteSpace(gateway))
+            sb.Append($"New-NetIPAddress -InterfaceAlias '{alias}' -IPAddress '{ip}' -PrefixLength {prefixLength}");
+        else
+            sb.Append($"New-NetIPAddress -InterfaceAlias '{alias}' -IPAddress '{ip}' -PrefixLength {prefixLength} -DefaultGateway '{gateway}'");
+        return sb.ToString();
+    }
+
+    public DhcpResult SetStaticIPv4(string adapterName, string ip, int prefixLength, string? gateway)
+    {
+        string alias = ProcessRunner.EscapePsSingleQuoted(adapterName);
+        string safeIp = ProcessRunner.EscapePsSingleQuoted(ip);
+        string script =
+            $"Set-NetIPInterface -InterfaceAlias '{alias}' -AddressFamily IPv4 -Dhcp Disabled; " +
+            $"Get-NetIPAddress -InterfaceAlias '{alias}' -AddressFamily IPv4 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false; " +
+            $"Get-NetRoute -InterfaceAlias '{alias}' -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false; ";
+
+        if (string.IsNullOrWhiteSpace(gateway))
+            script += $"New-NetIPAddress -InterfaceAlias '{alias}' -IPAddress '{safeIp}' -PrefixLength {prefixLength}";
+        else
+            script += $"New-NetIPAddress -InterfaceAlias '{alias}' -IPAddress '{safeIp}' -PrefixLength {prefixLength} -DefaultGateway '{ProcessRunner.EscapePsSingleQuoted(gateway)}'";
+
+        string error;
+        string output = ProcessRunner.RunPowerShell(script, out error, 30000);
+
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
+            return new DhcpResult { Success = false, Message = error.Trim() };
+
+        return new DhcpResult
+        {
+            Success = true,
+            Message = string.IsNullOrWhiteSpace(output) ? "静态 IP 已应用。" : output.Trim()
+        };
+    }
+
+    public static string GetEnableDhcpCommandPreview(string adapterName)
+    {
+        string alias = ProcessRunner.EscapePsSingleQuoted(adapterName);
+        return
+            $"Set-NetIPInterface -InterfaceAlias '{alias}' -AddressFamily IPv4 -Dhcp Enabled\n" +
+            $"Get-NetRoute -InterfaceAlias '{alias}' -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false";
+    }
+
+    public DhcpResult EnableDhcpIPv4(string adapterName)
+    {
+        string alias = ProcessRunner.EscapePsSingleQuoted(adapterName);
+        string script =
+            $"Set-NetIPInterface -InterfaceAlias '{alias}' -AddressFamily IPv4 -Dhcp Enabled; " +
+            $"Get-NetRoute -InterfaceAlias '{alias}' -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false";
+
+        string error;
+        string output = ProcessRunner.RunPowerShell(script, out error, 20000);
+
+        if (!string.IsNullOrEmpty(error) && !CI(error, "警告") && !CI(error, "Warning"))
+            return new DhcpResult { Success = false, Message = error.Trim() };
+
+        return new DhcpResult
+        {
+            Success = true,
+            Message = string.IsNullOrWhiteSpace(output) ? "已切换为 DHCP。" : output.Trim()
+        };
     }
 
     public DhcpResult Release(string adapterName, bool ipv6)
@@ -122,10 +206,6 @@ public class DhcpManager
         return new DhcpResult { Success = true, Message = output.Trim() };
     }
 
-    /// <summary>
-    /// 链式执行两条命令：第一条执行完后立即执行第二条。
-    /// 使用独立 cmd 进程，即使网络断开也能继续执行。
-    /// </summary>
     private static DhcpResult RunChainCommand(string releaseSwitch, string renewSwitch, string adapterName, string protocolLabel)
     {
         var outputParts = new List<string>();
@@ -137,7 +217,6 @@ public class DhcpManager
         if (!release.Success)
             anyFailed = true;
 
-        // 即使 release 失败（如地址已释放），仍继续执行 renew
         var renew = RunIpConfig(renewSwitch, adapterName, 60000);
         if (!string.IsNullOrWhiteSpace(renew.Message))
             outputParts.Add(renew.Message);

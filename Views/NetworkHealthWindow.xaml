@@ -28,7 +28,7 @@
         </DockPanel>
 
         <!-- 说明 -->
-        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"
                    Text="扫描常见的网络干扰源和异常配置。结果仅供参考，不代表一定有问题，需结合实际场景判断。"/>
 
         <!-- 结果表格 -->
@@ -39,8 +39,7 @@
                   SelectionMode="Extended"
                   GridLinesVisibility="Horizontal"
                   HeadersVisibility="Column"
-                  AlternatingRowBackground="#F8F8F8"
-                  ColumnWidth="Auto">
+                                    ColumnWidth="Auto">
             <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                     <Style.Triggers>

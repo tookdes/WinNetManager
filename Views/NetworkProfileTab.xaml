@@ -6,26 +6,25 @@
             <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
             <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
             <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="重命名" Padding="12,4" Margin="6,0,0,0" Click="BtnRename_Click"/>
             <Button Content="设为公用" Padding="12,4" Margin="6,0,0,0" Click="BtnSetPublic_Click"/>
             <Button Content="设为专用" Padding="12,4" Margin="6,0,0,0" Click="BtnSetPrivate_Click"/>
-            <Button Content="删除选中" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnDelete_Click"/>
+            <Button Content="删除选中" Padding="12,4" Margin="6,0,0,0" Foreground="{DynamicResource DangerBrush}" Click="BtnDelete_Click"/>
         </StackPanel>
-        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"
                    Text="管理「网络」「网络 2」「网络 3」等网络位置配置文件。Ctrl+点击多选，Shift+点击范围选。"/>
         <Grid>
             <DataGrid x:Name="ProfileGrid" AutoGenerateColumns="False" CanUserAddRows="False"
                       IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
-                      ColumnWidth="Auto" Sorting="Grid_Sorting">
+                      HeadersVisibility="Column"                       ColumnWidth="Auto" Sorting="Grid_Sorting">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="重命名" Click="BtnRename_Click" FontWeight="Bold"/>
                         <MenuItem Header="设为公用" Click="BtnSetPublic_Click"/>
                         <MenuItem Header="设为专用" Click="BtnSetPrivate_Click"/>
                         <Separator/>
-                        <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
+                        <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="{DynamicResource DangerBrush}"/>
                         <Separator/>
                         <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
                         <MenuItem Header="在 RegEdit 中打开" Click="MenuOpenRegEdit_Click"/>
@@ -43,11 +42,11 @@
                     <DataGridTextColumn Binding="{Binding Guid}" Header="GUID" Width="Auto"/>
                 </DataGrid.Columns>
             </DataGrid>
-            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+            <Border x:Name="EmptyState" Background="{DynamicResource EmptyStateBgBrush}" Visibility="Collapsed">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
-                    <TextBlock Text="&#x1F4C4;" FontSize="48" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
-                    <TextBlock Text="暂无网络配置文件" FontSize="16" Foreground="#666" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
-                    <TextBlock Text="Windows 会自动创建网络配置文件，连接新网络后点击刷新即可查看。" FontSize="12" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
+                    <TextBlock Text="&#x1F4C4;" FontSize="48" HorizontalAlignment="Center" Foreground="{DynamicResource EmptyIconBrush}" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="暂无网络配置文件" FontSize="16" Foreground="{DynamicResource EmptyTitleBrush}" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="Windows 会自动创建网络配置文件，连接新网络后点击刷新即可查看。" FontSize="12" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
                     <Button Content="刷新" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnRefresh_Click"/>
                 </StackPanel>
             </Border>

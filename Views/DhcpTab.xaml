@@ -6,27 +6,37 @@
             <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
             <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
             <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
+            <Button Content="设为静态" Padding="12,4" Margin="6,0,0,0" Click="BtnSetStatic_Click"
+                    ToolTip="为选中网卡配置静态 IPv4 地址 / 前缀 / 网关（一次只能操作一块网卡）"/>
+            <Button Content="设为 DHCP" Padding="12,4" Margin="6,0,0,0" Click="BtnEnableDhcp_Click"
+                    ToolTip="将选中网卡的 IPv4 切换为自动获取（DHCP）"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="IPv4 释放+续租" Padding="12,4" Margin="6,0,0,0" Click="BtnReleaseRenew4_Click"
                     ToolTip="先释放再续租 IPv4 地址（适用于远程机器，命令后台链式执行）"/>
             <Button Content="IPv6 释放+续租" Padding="12,4" Margin="6,0,0,0" Click="BtnReleaseRenew6_Click"
                     ToolTip="先释放再续租 IPv6 地址（适用于远程机器，命令后台链式执行）"/>
-            <Button Content="重启网卡" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnRestartAdapter_Click"
+            <Button Content="重启网卡" Padding="12,4" Margin="6,0,0,0"
+                    Foreground="{DynamicResource DangerBrush}" Click="BtnRestartAdapter_Click"
                     ToolTip="安全地禁用并重新启用网卡（后台原子操作，适用于远程机器断网自启）"/>
         </StackPanel>
-        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray"
-                   Text="管理网卡 IP 配置，支持 DHCP 释放/续租与网卡重启。远程机器也能安全使用——命令在后台执行，网络断开不影响操作完成。"/>
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   Text="管理网卡 IP：静态/DHCP 切换、释放续租、网卡重启。修改静态 IP 有断连风险；远程场景优先用 DHCP 释放续租或重启。"/>
         <Grid>
             <DataGrid x:Name="AdapterGrid" AutoGenerateColumns="False" CanUserAddRows="False"
                       IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
-                      ColumnWidth="Auto" Sorting="Grid_Sorting">
+                      HeadersVisibility="Column" ColumnWidth="Auto" Sorting="Grid_Sorting">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
+                        <MenuItem Header="设为静态" Click="BtnSetStatic_Click"/>
+                        <MenuItem Header="设为 DHCP" Click="BtnEnableDhcp_Click"/>
+                        <Separator/>
                         <MenuItem Header="IPv4 释放+续租" Click="BtnReleaseRenew4_Click"/>
                         <MenuItem Header="IPv6 释放+续租" Click="BtnReleaseRenew6_Click"/>
                         <Separator/>
-                        <MenuItem Header="重启网卡" Click="BtnRestartAdapter_Click" Foreground="Red"/>
+                        <MenuItem Header="重启网卡" Click="BtnRestartAdapter_Click"
+                                  Foreground="{DynamicResource DangerBrush}"/>
                         <Separator/>
                         <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
                     </ContextMenu>
@@ -37,10 +47,15 @@
                     <DataGridTextColumn Binding="{Binding Status}" Header="状态" Width="Auto"/>
                     <DataGridTextColumn Binding="{Binding DhcpStatusDisplay}" Width="Auto">
                         <DataGridTextColumn.Header>
-                            <TextBlock Text="配置方式" ToolTip="DHCP = 自动获取 IP；Static = 手动指定 IP"/>
+                            <TextBlock Text="配置方式" ToolTip="DHCP = 自动获取 IP；静态 = 手动指定 IP"/>
                         </DataGridTextColumn.Header>
                     </DataGridTextColumn>
-                    <DataGridTextColumn Binding="{Binding IPv4Address}" Header="IPv4 地址" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding IPv4Display}" Width="Auto">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="IPv4" ToolTip="地址/前缀长度"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding Gateway}" Header="网关" Width="Auto"/>
                     <DataGridTextColumn Binding="{Binding IPv6Address}" Header="IPv6 地址" Width="Auto"/>
                     <DataGridTextColumn Binding="{Binding MacAddress}" Width="Auto">
                         <DataGridTextColumn.Header>
@@ -49,11 +64,15 @@
                     </DataGridTextColumn>
                 </DataGrid.Columns>
             </DataGrid>
-            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+            <Border x:Name="EmptyState" Background="{DynamicResource EmptyStateBgBrush}" Visibility="Collapsed">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
-                    <TextBlock Text="&#x1F4E1;" FontSize="48" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
-                    <TextBlock Text="未检测到网卡" FontSize="16" Foreground="#666" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
-                    <TextBlock Text="无法获取网络适配器信息。请确保以管理员身份运行本工具。" FontSize="12" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
+                    <TextBlock Text="&#x1F4E1;" FontSize="48" HorizontalAlignment="Center"
+                               Foreground="{DynamicResource EmptyIconBrush}" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="未检测到网卡" FontSize="16" Foreground="{DynamicResource EmptyTitleBrush}"
+                               HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="无法获取网络适配器信息。请确保以管理员身份运行本工具。" FontSize="12"
+                               Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap"
+                               TextAlignment="Center" MaxWidth="420"/>
                     <Button Content="刷新" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnRefresh_Click"/>
                 </StackPanel>
             </Border>

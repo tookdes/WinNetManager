@@ -5,25 +5,24 @@
         Title="WinNetManager - Windows 网络管理工具" Height="620" Width="960"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
         Icon="netfol.ico"
-        KeyDown="Window_KeyDown">
-    <Window.Resources>
-        <Style TargetType="TabItem">
-            <Setter Property="Padding" Value="12,6"/>
-            <Setter Property="FontSize" Value="13"/>
-        </Style>
-    </Window.Resources>
+        KeyDown="Window_KeyDown"
+        Background="{DynamicResource WindowBgBrush}">
     <DockPanel>
         <Expander DockPanel.Dock="Bottom" x:Name="CmdPreviewExpander" Header="命令预览" IsExpanded="False"
-                  BorderBrush="#DDD" BorderThickness="0,1,0,0" Background="#FAFAFA">
+                  BorderBrush="{DynamicResource BorderLineBrush}" BorderThickness="0,1,0,0"
+                  Background="{DynamicResource CmdPreviewBgBrush}">
             <TextBox x:Name="TxtCommandPreview" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
-                     Background="#FAFAFA" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                     Background="{DynamicResource CmdPreviewBgBrush}" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
                      MaxHeight="100" Padding="6,4" BorderThickness="0"/>
         </Expander>
         <StatusBar DockPanel.Dock="Bottom" Padding="4,3">
             <TextBlock x:Name="StatusText" Text="就绪" VerticalAlignment="Center"/>
             <StatusBarItem HorizontalAlignment="Right">
                 <StackPanel Orientation="Horizontal">
-                    <Button Content="网络适配器" Padding="8,2" FontSize="11" Click="BtnNcpa_Click"
+                    <Button x:Name="BtnTheme" Content="暗色" Padding="8,2" FontSize="11" Click="BtnTheme_Click"
+                            ToolTip="切换亮色 / 暗色主题"/>
+                    <Button Content="网络适配器" Padding="8,2" FontSize="11" Margin="6,0,0,0" Click="BtnNcpa_Click"
                             ToolTip="打开 控制面板\网络连接 (ncpa.cpl)"/>
                     <Button Content="设备管理器" Padding="8,2" FontSize="11" Margin="6,0,0,0" Click="BtnDevMgr_Click"
                             ToolTip="打开设备管理器 (devmgmt.msc)"/>

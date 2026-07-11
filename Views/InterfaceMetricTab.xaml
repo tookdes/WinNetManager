@@ -7,10 +7,10 @@
             <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
             <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
             <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="修改跃点" Padding="12,4" Margin="6,0,0,0" Click="BtnEdit_Click" ToolTip="为选中的网卡设置指定跃点数 (F2)"/>
             <Button Content="设为自动跃点" Padding="12,4" Margin="6,0,0,0" Click="BtnAuto_Click" ToolTip="为选中的网卡启用自动跃点"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <ComboBox x:Name="CmbAddressFamily" Width="52" Padding="2,2" Margin="4,0,0,0"
                       VerticalContentAlignment="Center" SelectionChanged="CmbAddressFamily_SelectionChanged">
                 <ComboBoxItem Content="全部" Tag="" IsSelected="True"/>
@@ -24,9 +24,9 @@
 
         <!-- 描述 + 计数 -->
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
-            <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="Gray"
+            <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"
                        Text="管理每个网卡的 IPv4/IPv6 接口跃点数，决定多网卡路由优先级"/>
-            <TextBlock x:Name="TbkCount" DockPanel.Dock="Right" FontSize="11" Foreground="Gray" HorizontalAlignment="Right"/>
+            <TextBlock x:Name="TbkCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" HorizontalAlignment="Right"/>
         </DockPanel>
 
         <!-- 表格 + 空状态 -->
@@ -45,8 +45,7 @@
                       SelectionMode="Extended"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
-                      AlternatingRowBackground="#F8F8F8"
-                      ColumnWidth="Auto"
+                                            ColumnWidth="Auto"
                       Sorting="Grid_Sorting">
                 <DataGrid.Columns>
                     <DataGridTextColumn Binding="{Binding InterfaceAlias}" Width="200">
@@ -89,8 +88,8 @@
 
             <DockPanel Grid.Row="2" Margin="0,4,0,0">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                    <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="Gray" Text="默认网关跃点 (0.0.0.0 / ::/0)"/>
-                    <TextBlock x:Name="TbkGatewayCount" DockPanel.Dock="Right" FontSize="11" Foreground="Gray" HorizontalAlignment="Right"/>
+                    <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Text="默认网关跃点 (0.0.0.0 / ::/0)"/>
+                    <TextBlock x:Name="TbkGatewayCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" HorizontalAlignment="Right"/>
                 </DockPanel>
                 <DataGrid x:Name="GatewayGrid"
                           AutoGenerateColumns="False"
@@ -99,8 +98,7 @@
                           SelectionMode="Extended"
                           GridLinesVisibility="Horizontal"
                           HeadersVisibility="Column"
-                          AlternatingRowBackground="#F8F8F8"
-                          ColumnWidth="Auto"
+                                                    ColumnWidth="Auto"
                           Sorting="GatewayGrid_Sorting">
                     <DataGrid.Columns>
                         <DataGridTextColumn Binding="{Binding InterfaceAlias}" Width="200" Header="网卡名称"/>
@@ -119,13 +117,13 @@
                 </DataGrid>
             </DockPanel>
 
-            <Border x:Name="EmptyState" Grid.RowSpan="3" Background="#FAFAFA" Visibility="Collapsed" Panel.ZIndex="10">
+            <Border x:Name="EmptyState" Grid.RowSpan="3" Background="{DynamicResource EmptyStateBgBrush}" Visibility="Collapsed" Panel.ZIndex="10">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
                     <TextBlock Text="&#x1F4CA;" FontSize="48" HorizontalAlignment="Center"
-                               Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
-                    <TextBlock Text="暂无网卡跃点信息" FontSize="16" Foreground="#666"
+                               Foreground="{DynamicResource EmptyIconBrush}" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="暂无网卡跃点信息" FontSize="16" Foreground="{DynamicResource EmptyTitleBrush}"
                                HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
-                    <TextBlock Text="未检测到活动的网络接口，请检查网卡状态。" FontSize="12" Foreground="#999"
+                    <TextBlock Text="未检测到活动的网络接口，请检查网卡状态。" FontSize="12" Foreground="{DynamicResource MutedTextBrush}"
                                TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
                     <Button Content="刷新" Padding="16,4" Margin="0,16,0,0"
                             HorizontalAlignment="Center" Click="BtnRefresh_Click"/>

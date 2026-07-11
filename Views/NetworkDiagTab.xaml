@@ -4,11 +4,11 @@
     <DockPanel Margin="8">
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
             <Button Content="刷新" x:Name="BtnRefresh" Padding="12,4" Click="BtnRefresh_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="端口测试" Padding="12,4" Margin="6,0,0,0" Click="BtnPortTest_Click"/>
             <Button Content="Tracert" Padding="12,4" Margin="6,0,0,0" Click="BtnTracert_Click"/>
             <Button Content="Pathping" Padding="12,4" Margin="6,0,0,0" Click="BtnPathping_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="网络健康扫描" Padding="12,4" Margin="6,0,0,0" Click="BtnHealthScan_Click"
                     ToolTip="扫描常见的网络干扰源和异常配置（WinDivert/TUN/代理/PAC/VPN/WFP 等）"/>
         </StackPanel>
@@ -27,41 +27,77 @@
             <Label Grid.Column="2" Content="端口：" VerticalAlignment="Center" Margin="8,0,0,0"/>
             <TextBox Grid.Column="3" x:Name="TxtPort" Padding="4,2" Text="443"
                      ToolTip="TCP 端口，默认 443"/>
-            <TextBlock Grid.Column="4" FontSize="11" Foreground="Gray" Margin="12,0,0,0" VerticalAlignment="Center"
+            <TextBlock Grid.Column="4" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"
+                       Margin="12,0,0,0" VerticalAlignment="Center"
                        Text="Tracert 和 Pathping 将弹出 PowerShell 窗口直接显示输出。"/>
         </Grid>
 
-        <TextBlock DockPanel.Dock="Top" FontSize="11" Foreground="Gray" Margin="0,0,0,6"
-                   Text="端口测试使用 Test-NetConnection 检测 TCP 连通性；Tracert / Pathping 调用原生命令弹窗输出。"/>
+        <TextBlock DockPanel.Dock="Top" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,6"
+                   Text="上方为监听端口（TCP Listen + UDP）；下方为已建立的 TCP 连接。"/>
 
-        <GroupBox Header="当前 TCP 连接（监听 + 已建立）" DockPanel.Dock="Top" Margin="0,0,0,0">
-            <Grid>
-                <DataGrid x:Name="ConnectionGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                          IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                          HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
-                          ColumnWidth="Auto" MaxHeight="350">
-                    <DataGrid.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
-                        </ContextMenu>
-                    </DataGrid.ContextMenu>
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Binding="{Binding LocalAddress}" Header="本地地址" Width="Auto"/>
-                        <DataGridTextColumn Binding="{Binding LocalPort}" Header="本地端口" Width="Auto"/>
-                        <DataGridTextColumn Binding="{Binding RemoteAddress}" Header="远程地址" Width="Auto"/>
-                        <DataGridTextColumn Binding="{Binding RemotePort}" Header="远程端口" Width="Auto"/>
-                        <DataGridTextColumn Binding="{Binding State}" Header="状态" Width="Auto"/>
-                        <DataGridTextColumn Binding="{Binding OwningProcess}" Header="进程" Width="Auto"/>
-                    </DataGrid.Columns>
-                </DataGrid>
-                <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,30">
-                        <TextBlock Text="&#x1F50C;" FontSize="36" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
-                        <TextBlock Text="暂无 TCP 连接" FontSize="14" Foreground="#666" HorizontalAlignment="Center" Margin="0,8,0,2" FontWeight="SemiBold"/>
-                        <TextBlock Text="没有检测到监听或已建立的 TCP 连接。" FontSize="11" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360"/>
-                    </StackPanel>
-                </Border>
-            </Grid>
-        </GroupBox>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="5"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <GroupBox Header="监听端口（TCP / UDP）" Grid.Row="0">
+                <Grid>
+                    <DataGrid x:Name="ListenerGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                              IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column" ColumnWidth="Auto">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="复制选中值" Click="MenuCopyListener_Click"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Binding="{Binding Protocol}" Header="协议" Width="Auto"/>
+                            <DataGridTextColumn Binding="{Binding LocalAddress}" Header="本地地址" Width="Auto"/>
+                            <DataGridTextColumn Binding="{Binding LocalPort}" Header="端口" Width="Auto"/>
+                            <DataGridTextColumn Binding="{Binding OwningProcess}" Header="进程" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <Border x:Name="EmptyListeners" Background="{DynamicResource EmptyStateBgBrush}" Visibility="Collapsed">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,20">
+                            <TextBlock Text="暂无监听端口" FontSize="13" Foreground="{DynamicResource EmptyTitleBrush}"
+                                       HorizontalAlignment="Center" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </GroupBox>
+
+            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+                          Background="{DynamicResource SeparatorBrush}"/>
+
+            <GroupBox Header="已建立 TCP 连接" Grid.Row="2">
+                <Grid>
+                    <DataGrid x:Name="ConnectionGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                              IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column" ColumnWidth="Auto">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Binding="{Binding LocalAddress}" Header="本地地址" Width="Auto"/>
+                            <DataGridTextColumn Binding="{Binding LocalPort}" Header="本地端口" Width="Auto"/>
+                            <DataGridTextColumn Binding="{Binding RemoteAddress}" Header="远程地址" Width="Auto"/>
+                            <DataGridTextColumn Binding="{Binding RemotePort}" Header="远程端口" Width="Auto"/>
+                            <DataGridTextColumn Binding="{Binding State}" Header="状态" Width="Auto"/>
+                            <DataGridTextColumn Binding="{Binding OwningProcess}" Header="进程" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <Border x:Name="EmptyState" Background="{DynamicResource EmptyStateBgBrush}" Visibility="Collapsed">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,20">
+                            <TextBlock Text="暂无已建立连接" FontSize="13" Foreground="{DynamicResource EmptyTitleBrush}"
+                                       HorizontalAlignment="Center" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </GroupBox>
+        </Grid>
     </DockPanel>
 </UserControl>

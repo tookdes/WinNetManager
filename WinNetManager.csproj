@@ -9,6 +9,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>netfol.ico</ApplicationIcon>
+    <DefaultItemExcludes>$(DefaultItemExcludes);ref\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

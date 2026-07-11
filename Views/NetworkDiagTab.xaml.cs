@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
 using WinNetManager.Services;
 
 namespace WinNetManager.Views;
@@ -15,24 +13,33 @@ namespace WinNetManager.Views;
 public partial class NetworkDiagTab : UserControl
 {
     private readonly ObservableCollection<TcpConnectionInfo> _connections = new();
+    private readonly ObservableCollection<ListenerInfo> _listeners = new();
 
     public NetworkDiagTab()
     {
         InitializeComponent();
         ConnectionGrid.ItemsSource = _connections;
-        Loaded += async (_, _) => await RefreshConnectionsAsync();
+        ListenerGrid.ItemsSource = _listeners;
+        Loaded += async (_, _) => await RefreshAllAsync();
     }
 
-    private async Task RefreshConnectionsAsync()
+    private async Task RefreshAllAsync()
     {
         try
         {
-            var conns = await Task.Run(() => GetTcpConnections());
+            var (listeners, conns) = await Task.Run(() => (GetListeners(), GetEstablishedConnections()));
+
+            _listeners.Clear();
+            foreach (var l in listeners)
+                _listeners.Add(l);
+            EmptyListeners.Visibility = _listeners.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
             _connections.Clear();
             foreach (var c in conns)
                 _connections.Add(c);
-            SetStatus($"已加载 {_connections.Count} 条 TCP 连接");
             EmptyState.Visibility = _connections.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            SetStatus($"监听 {_listeners.Count} · 已建立 {_connections.Count}");
         }
         catch (Exception ex)
         {
@@ -40,37 +47,75 @@ public partial class NetworkDiagTab : UserControl
         }
     }
 
-    private void RefreshConnections()
+    private static List<ListenerInfo> GetListeners()
     {
-        try
+        var result = new List<ListenerInfo>();
+
+        // TCP Listen
+        string error;
+        string tcpOut = ProcessRunner.RunPowerShell(
+            "Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | " +
+            "Select-Object LocalAddress, LocalPort, OwningProcess | " +
+            "ConvertTo-Csv -NoTypeInformation",
+            out error, 15000);
+        AppendListeners(result, tcpOut, "TCP");
+
+        // UDP endpoints
+        string udpOut = ProcessRunner.RunPowerShell(
+            "Get-NetUDPEndpoint -ErrorAction SilentlyContinue | " +
+            "Select-Object LocalAddress, LocalPort, OwningProcess | " +
+            "ConvertTo-Csv -NoTypeInformation",
+            out error, 15000);
+        AppendListeners(result, udpOut, "UDP");
+
+        return result
+            .OrderBy(l => int.TryParse(l.LocalPort, out int p) ? p : 0)
+            .ThenBy(l => l.Protocol)
+            .ToList();
+    }
+
+    private static void AppendListeners(List<ListenerInfo> result, string csv, string protocol)
+    {
+        var lines = csv.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length < 2) return;
+
+        string[] headers = CsvParser.ParseLine(lines[0]);
+        int idxLocalAddr = Array.IndexOf(headers, "LocalAddress");
+        int idxLocalPort = Array.IndexOf(headers, "LocalPort");
+        int idxPid = Array.IndexOf(headers, "OwningProcess");
+
+        for (int i = 1; i < lines.Length; i++)
         {
-            _connections.Clear();
-            foreach (var c in GetTcpConnections())
-                _connections.Add(c);
-            SetStatus($"已加载 {_connections.Count} 条 TCP 连接");
-            EmptyState.Visibility = _connections.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        }
-        catch (Exception ex)
-        {
-            CopyableMessageBox.Show($"加载连接信息失败：{ex.Message}", "错误", MessageBoxImage.Error);
+            string[] values = CsvParser.ParseLine(lines[i]);
+            if (values.Length < 2) continue;
+
+            string pid = idxPid >= 0 && idxPid < values.Length ? values[idxPid] : "";
+            string procName = GetProcessName(pid);
+
+            result.Add(new ListenerInfo
+            {
+                Protocol = protocol,
+                LocalAddress = idxLocalAddr >= 0 && idxLocalAddr < values.Length ? values[idxLocalAddr] : "",
+                LocalPort = idxLocalPort >= 0 && idxLocalPort < values.Length ? values[idxLocalPort] : "",
+                OwningProcess = string.IsNullOrEmpty(procName) ? $"PID {pid}" : $"{procName} ({pid})",
+            });
         }
     }
 
-    private static List<TcpConnectionInfo> GetTcpConnections()
+    private static List<TcpConnectionInfo> GetEstablishedConnections()
     {
         var result = new List<TcpConnectionInfo>();
         string error;
-        string output = RunPowerShell(
-            "Get-NetTCPConnection | Where-Object { $_.State -eq 'Listen' -or $_.State -eq 'Established' } | " +
+        string output = ProcessRunner.RunPowerShell(
+            "Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | " +
             "Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess | " +
             "ConvertTo-Csv -NoTypeInformation",
             out error, 15000);
 
-        // stderr 可能包含空行或无害提示；只要 stdout 有数据就继续解析
         var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
         if (lines.Length < 2) return result;
 
-        string[] headers = ParseCsvLine(lines[0]);
+        string[] headers = CsvParser.ParseLine(lines[0]);
         int idxLocalAddr = Array.IndexOf(headers, "LocalAddress");
         int idxLocalPort = Array.IndexOf(headers, "LocalPort");
         int idxRemoteAddr = Array.IndexOf(headers, "RemoteAddress");
@@ -80,7 +125,7 @@ public partial class NetworkDiagTab : UserControl
 
         for (int i = 1; i < lines.Length; i++)
         {
-            string[] values = ParseCsvLine(lines[i]);
+            string[] values = CsvParser.ParseLine(lines[i]);
             if (values.Length < 3) continue;
 
             string pid = idxPid >= 0 && idxPid < values.Length ? values[idxPid] : "";
@@ -105,8 +150,7 @@ public partial class NetworkDiagTab : UserControl
         if (!int.TryParse(pid, out int id) || id <= 0) return "";
         try
         {
-            var proc = Process.GetProcessById(id);
-            return proc.ProcessName;
+            return Process.GetProcessById(id).ProcessName;
         }
         catch
         {
@@ -114,9 +158,7 @@ public partial class NetworkDiagTab : UserControl
         }
     }
 
-    // --- 按钮事件 ---
-
-    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshConnectionsAsync();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
 
     private void BtnPortTest_Click(object sender, RoutedEventArgs e)
     {
@@ -201,7 +243,7 @@ public partial class NetworkDiagTab : UserControl
         List<NetworkHealthItem> items;
         try
         {
-            items = await System.Threading.Tasks.Task.Run(() => NetworkHealthService.GetSnapshot());
+            items = await Task.Run(() => NetworkHealthService.GetSnapshot());
         }
         catch (Exception ex)
         {
@@ -219,6 +261,7 @@ public partial class NetworkDiagTab : UserControl
         {
             Owner = Window.GetWindow(this)
         };
+        ThemeManager.ApplyTitleBar(dlg);
         dlg.ShowDialog();
 
         int danger = items.Count(i => i.Risk == "Danger");
@@ -229,12 +272,8 @@ public partial class NetworkDiagTab : UserControl
     private void MenuCopy_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.CopySelectedCellValue(ConnectionGrid);
 
-    // --- 工具 ---
-
-    private static string RunPowerShell(string script, out string error, int timeoutMs)
-        => ProcessRunner.RunPowerShell(script, out error, timeoutMs);
-
-    private static string[] ParseCsvLine(string line) => CsvParser.ParseLine(line);
+    private void MenuCopyListener_Click(object sender, RoutedEventArgs e) =>
+        NetworkProfileTab.CopySelectedCellValue(ListenerGrid);
 
     private void SetStatus(string msg)
     {
@@ -249,5 +288,13 @@ public class TcpConnectionInfo
     public string RemoteAddress { get; set; } = "";
     public string RemotePort { get; set; } = "";
     public string State { get; set; } = "";
+    public string OwningProcess { get; set; } = "";
+}
+
+public class ListenerInfo
+{
+    public string Protocol { get; set; } = "";
+    public string LocalAddress { get; set; } = "";
+    public string LocalPort { get; set; } = "";
     public string OwningProcess { get; set; } = "";
 }

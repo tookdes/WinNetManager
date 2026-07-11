@@ -13,10 +13,21 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ThemeManager.ApplyTitleBar(this);
+        UpdateThemeButton();
+        ThemeManager.ThemeChanged += UpdateThemeButton;
         // 连接名称变更后，需要刷新所有使用 InterfaceAlias 的标签页。
         // 各标签页独立加载数据（Loaded 事件或手动刷新），没有共享数据源，
         // 所以改名后如果不主动刷新，它们会继续显示内存中的旧名称。
         ConnectionNameService.ConnectionsChanged += OnConnectionsChanged;
+    }
+
+    private void BtnTheme_Click(object sender, RoutedEventArgs e) => ThemeManager.Toggle();
+
+    private void UpdateThemeButton()
+    {
+        BtnTheme.Content = ThemeManager.IsDark ? "亮色" : "暗色";
+        BtnTheme.ToolTip = ThemeManager.IsDark ? "切换为亮色主题" : "切换为暗色主题";
     }
 
     private async void OnConnectionsChanged()

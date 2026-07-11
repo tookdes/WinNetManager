@@ -8,21 +8,20 @@
                     ToolTip="打开选中网卡的设备管理器属性（高级、驱动、电源管理等）"/>
             <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
             <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
-            <Button Content="卸载选中" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnRemove_Click"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
+            <Button Content="卸载选中" Padding="12,4" Margin="6,0,0,0" Foreground="{DynamicResource DangerBrush}" Click="BtnRemove_Click"/>
         </StackPanel>
-        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="Gray" TextWrapping="Wrap"
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
                    Text="枚举所有网络适配器设备（含设备管理器中隐藏的幽灵设备）。选中后点「设备属性」可快速打开高级选项、驱动与电源管理。WAN Miniport 等系统虚拟设备虽显示为幽灵，但不应卸载。Ctrl+点击多选，双击打开属性。"/>
         <Grid>
             <DataGrid x:Name="AdapterGrid" AutoGenerateColumns="False" CanUserAddRows="False"
                       IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
-                      HeadersVisibility="Column" AlternatingRowBackground="#F8F8F8"
-                      MouseDoubleClick="AdapterGrid_MouseDoubleClick">
+                      HeadersVisibility="Column"                       MouseDoubleClick="AdapterGrid_MouseDoubleClick">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="设备属性" Click="BtnProperties_Click"/>
                         <Separator/>
-                        <MenuItem Header="卸载" Click="BtnRemove_Click" Foreground="Red"/>
+                        <MenuItem Header="卸载" Click="BtnRemove_Click" Foreground="{DynamicResource DangerBrush}"/>
                         <Separator/>
                         <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
                     </ContextMenu>
@@ -34,11 +33,11 @@
                     <DataGridTextColumn Binding="{Binding DeviceInstanceId}" Header="实例 ID" Width="*"/>
                 </DataGrid.Columns>
             </DataGrid>
-            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+            <Border x:Name="EmptyState" Background="{DynamicResource EmptyStateBgBrush}" Visibility="Collapsed">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
-                    <TextBlock Text="&#x1F47B;" FontSize="48" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
-                    <TextBlock Text="未发现网络适配器" FontSize="16" Foreground="#666" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
-                    <TextBlock Text="所有网络适配器均正常显示。如果之前卸载过驱动，以管理员身份运行可能发现残留设备。" FontSize="12" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
+                    <TextBlock Text="&#x1F47B;" FontSize="48" HorizontalAlignment="Center" Foreground="{DynamicResource EmptyIconBrush}" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="未发现网络适配器" FontSize="16" Foreground="{DynamicResource EmptyTitleBrush}" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="所有网络适配器均正常显示。如果之前卸载过驱动，以管理员身份运行可能发现残留设备。" FontSize="12" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
                     <Button Content="刷新" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnRefresh_Click"/>
                 </StackPanel>
             </Border>

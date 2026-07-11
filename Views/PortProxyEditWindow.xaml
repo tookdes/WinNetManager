@@ -48,12 +48,12 @@
 
         <Label Grid.Row="5" Grid.Column="0" Content="协议：" VerticalAlignment="Center" />
         <TextBox Grid.Row="5" Grid.Column="1" x:Name="TxtProtocol" Margin="5" Text="tcp"
-                 IsReadOnly="True" Background="#F0F0F0" Foreground="Gray"
+                 IsReadOnly="True" Background="{DynamicResource ReadOnlyBgBrush}" Foreground="{DynamicResource SecondaryTextBrush}"
                  ToolTip="netsh portproxy 仅支持 TCP 协议" />
 
         <TextBlock Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
                    Text="提示：使用 0.0.0.0 监听所有 IPv4 地址，使用 :: 监听所有 IPv6 地址。"
-                   Foreground="Gray" FontSize="11" Margin="5,10,5,0" TextWrapping="Wrap"
+                   Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="5,10,5,0" TextWrapping="Wrap"
                    VerticalAlignment="Bottom" />
 
         <StackPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2"

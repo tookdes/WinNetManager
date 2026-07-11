@@ -13,14 +13,14 @@
             <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
             <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
             <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="新建" Padding="12,4" Margin="6,0,0,0" Click="BtnNew_Click"/>
             <Button Content="修改" Padding="12,4" Margin="6,0,0,0" Click="BtnEdit_Click"/>
-            <Button Content="删除" Padding="12,4" Margin="6,0,0,0" Foreground="Red" Click="BtnDelete_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Button Content="删除" Padding="12,4" Margin="6,0,0,0" Foreground="{DynamicResource DangerBrush}" Click="BtnDelete_Click"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button x:Name="BtnApply" Content="应用更改" Padding="12,4" Margin="6,0,0,0" Click="BtnApply_Click"/>
             <Button x:Name="BtnCancelChanges" Content="取消更改" Padding="12,4" Margin="6,0,0,0" Click="BtnCancelChanges_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <ComboBox x:Name="CmbAddressFamily" Width="52" Padding="2,2" Margin="4,0,0,0" VerticalContentAlignment="Center" SelectionChanged="CmbAddressFamily_SelectionChanged">
                 <ComboBoxItem Content="全部" Tag="" IsSelected="True"/>
                 <ComboBoxItem Content="IPv4" Tag="IPv4"/>
@@ -29,15 +29,15 @@
             <TextBox x:Name="TxtFilter" Width="80" Margin="4,0,0,0" Padding="4,2"
                      TextChanged="TxtFilter_TextChanged" ToolTip="筛选目标前缀、下一跳、接口等"/>
             <Button Content="清除" Padding="8,4" Margin="4,0,0,0" Click="BtnClearFilter_Click"/>
-            <Rectangle Width="1" Fill="#CCC" Margin="10,2"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="导出" Padding="10,4" Margin="6,0,0,0" Click="BtnExport_Click"/>
             <Button Content="导入" Padding="10,4" Margin="4,0,0,0" Click="BtnImport_Click"/>
         </StackPanel>
 
         <DockPanel Grid.Row="1" Margin="0,0,0,6">
-            <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="Gray"
+            <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"
                        Text="管理 Windows 持久路由（重启后仍然保留的路由）。新建/修改/删除后需点击「应用更改」才能写入系统。"/>
-            <TextBlock x:Name="TbkCount" DockPanel.Dock="Right" FontSize="11" Foreground="Gray" HorizontalAlignment="Right"/>
+            <TextBlock x:Name="TbkCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" HorizontalAlignment="Right"/>
         </DockPanel>
 
         <Grid Grid.Row="2">
@@ -50,30 +50,35 @@
                         <MenuItem Header="新建" Click="BtnNew_Click"/>
                         <MenuItem Header="修改" Click="BtnEdit_Click"/>
                         <Separator/>
-                        <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="Red"/>
+                        <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="{DynamicResource DangerBrush}"/>
                         <Separator/>
                         <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
                     </ContextMenu>
                 </DataGrid.ContextMenu>
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
-                        <Setter Property="Background" Value="White"/>
+                        <Setter Property="Background" Value="{DynamicResource PanelBgBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
                         <Style.Triggers>
                             <Trigger Property="ItemsControl.AlternationIndex" Value="1">
-                                <Setter Property="Background" Value="#F8F8F8"/>
+                                <Setter Property="Background" Value="{DynamicResource AltRowBrush}"/>
                             </Trigger>
                             <DataTrigger Binding="{Binding Status}" Value="Modified">
-                                <Setter Property="Background" Value="#FFF9E6"/>
+                                <Setter Property="Background" Value="{DynamicResource StatusModifiedBgBrush}"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Status}" Value="Added">
-                                <Setter Property="Background" Value="#E6F9E6"/>
+                                <Setter Property="Background" Value="{DynamicResource StatusAddedBgBrush}"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Status}" Value="Deleted">
-                                <Setter Property="Background" Value="#F4F4F4"/>
-                                <Setter Property="Foreground" Value="#AAA"/>
+                                <Setter Property="Background" Value="{DynamicResource StatusDeletedBgBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource StatusDeletedFgBrush}"/>
                                 <Setter Property="FontStyle" Value="Italic"/>
                                 <Setter Property="Opacity" Value="0.6"/>
                             </DataTrigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource SelectionBgBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource SelectionFgBrush}"/>
+                            </Trigger>
                         </Style.Triggers>
                     </Style>
                 </DataGrid.RowStyle>
@@ -110,11 +115,11 @@
                     </DataGridTextColumn>
                 </DataGrid.Columns>
             </DataGrid>
-            <Border x:Name="EmptyState" Background="#FAFAFA" Visibility="Collapsed">
+            <Border x:Name="EmptyState" Background="{DynamicResource EmptyStateBgBrush}" Visibility="Collapsed">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,40">
-                    <TextBlock Text="&#x1F6E3;" FontSize="48" HorizontalAlignment="Center" Foreground="#CCC" FontFamily="Segoe UI Emoji"/>
-                    <TextBlock Text="暂无持久路由" FontSize="16" Foreground="#666" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
-                    <TextBlock Text="当前没有配置任何持久路由。点击「新建」添加一条，重启后仍然生效。" FontSize="12" Foreground="#999" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
+                    <TextBlock Text="&#x1F6E3;" FontSize="48" HorizontalAlignment="Center" Foreground="{DynamicResource EmptyIconBrush}" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="暂无持久路由" FontSize="16" Foreground="{DynamicResource EmptyTitleBrush}" HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="当前没有配置任何持久路由。点击「新建」添加一条，重启后仍然生效。" FontSize="12" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"/>
                     <Button Content="新建" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnNew_Click"/>
                 </StackPanel>
             </Border>
@@ -128,7 +133,7 @@
                     <Button Content="测试路由" Padding="10,3" Margin="6,0,0,0" Click="BtnRouteTest_Click"/>
                 </StackPanel>
                 <TextBox x:Name="TxtTestResult" IsReadOnly="True"
-                         Background="#F8F8F8" FontFamily="Consolas" FontSize="12"
+                         Background="{DynamicResource ResultBoxBgBrush}" FontFamily="Consolas" FontSize="12"
                          TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
                          MaxHeight="80">
                     <TextBox.ContextMenu>

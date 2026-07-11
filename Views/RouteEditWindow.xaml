@@ -66,10 +66,10 @@
 
         <TextBlock Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
                    Text="提示：IPv4 默认路由使用 0.0.0.0/0，IPv6 默认路由使用 ::/0"
-                   Foreground="Gray" FontSize="11" Margin="5,10,5,0" TextWrapping="Wrap" />
+                   Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="5,10,5,0" TextWrapping="Wrap" />
         <TextBlock Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2"
                    Text="覆盖范围下拉框仅辅助选择掩码；熟悉 CIDR 的用户可直接在左侧输入完整的 192.168.1.0/24 格式。"
-                   Foreground="Gray" FontSize="11" Margin="5,0,5,0" TextWrapping="Wrap" />
+                   Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="5,0,5,0" TextWrapping="Wrap" />
 
         <Button Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" x:Name="BtnToggleCalc"
                 Content="不知道掩码？使用范围计算器" Padding="8,2" FontSize="11" Margin="5,2"
