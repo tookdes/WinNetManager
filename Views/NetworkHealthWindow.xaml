@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="网络健康扫描结果" Height="620" Width="920"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
-        KeyDown="Window_KeyDown">
+        KeyDown="Window_KeyDown"
+        Background="{DynamicResource WindowBgBrush}">
     <DockPanel Margin="10">
         <!-- 顶部摘要 + 工具栏 -->
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
@@ -44,13 +45,13 @@
                 <Style TargetType="DataGridRow">
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding Risk}" Value="Danger">
-                            <Setter Property="Background" Value="#FDECEC"/>
+                            <Setter Property="Background" Value="{DynamicResource RiskDangerBgBrush}"/>
                         </DataTrigger>
                         <DataTrigger Binding="{Binding Risk}" Value="Warn">
-                            <Setter Property="Background" Value="#FFF6E0"/>
+                            <Setter Property="Background" Value="{DynamicResource RiskWarnBgBrush}"/>
                         </DataTrigger>
                         <DataTrigger Binding="{Binding Risk}" Value="Info">
-                            <Setter Property="Background" Value="#EBF5FB"/>
+                            <Setter Property="Background" Value="{DynamicResource RiskInfoBgBrush}"/>
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>

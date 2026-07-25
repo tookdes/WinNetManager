@@ -28,4 +28,9 @@
     <SolidColorBrush x:Key="StatusAddedBgBrush" Color="#FFE6F9E6"/>
     <SolidColorBrush x:Key="StatusDeletedBgBrush" Color="#FFF4F4F4"/>
     <SolidColorBrush x:Key="StatusDeletedFgBrush" Color="#FFAAAAAA"/>
+    <SolidColorBrush x:Key="SuccessTextBrush" Color="#FF228B22"/>
+    <SolidColorBrush x:Key="WarningTextBrush" Color="#FFCC5500"/>
+    <SolidColorBrush x:Key="RiskDangerBgBrush" Color="#FFFDECEC"/>
+    <SolidColorBrush x:Key="RiskWarnBgBrush" Color="#FFFFF6E0"/>
+    <SolidColorBrush x:Key="RiskInfoBgBrush" Color="#FFEBF5FB"/>
 </ResourceDictionary>

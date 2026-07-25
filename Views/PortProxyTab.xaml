@@ -30,7 +30,8 @@
                        Text="管理 Windows 端口转发规则（netsh interface portproxy），支持 IPv4/IPv6 四种方向。依赖 IP Helper 服务。"/>
             <TextBlock x:Name="TbkCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" HorizontalAlignment="Right"/>
         </DockPanel>
-        <TextBlock x:Name="TbkServiceWarning" DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11" Foreground="OrangeRed"
+        <TextBlock x:Name="TbkServiceWarning" DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11"
+                   Foreground="{DynamicResource WarningTextBrush}"
                    Text="警告：IP Helper 服务未运行，端口转发规则不会生效。" Visibility="Collapsed"/>
         <Grid>
             <DataGrid x:Name="ProxyGrid" AutoGenerateColumns="False" CanUserAddRows="False"

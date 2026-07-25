@@ -84,7 +84,7 @@
                 </DataGrid.ContextMenu>
             </DataGrid>
 
-            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#EEE"/>
+            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"/>
 
             <DockPanel Grid.Row="2" Margin="0,4,0,0">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">

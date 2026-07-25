@@ -154,12 +154,35 @@ public partial class NetworkProfileTab : UserControl
 
     internal static string? PromptInput(string title, string prompt, string defaultValue, Window? owner = null)
     {
-        var dlg = new Window { Title = title, Width = 400, Height = 180, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize, Owner = owner ?? Application.Current.MainWindow };
+        var dlg = new Window
+        {
+            Title = title,
+            Width = 400,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            Owner = owner ?? Application.Current.MainWindow,
+            Background = (System.Windows.Media.Brush)Application.Current.Resources["WindowBgBrush"],
+            Foreground = (System.Windows.Media.Brush)Application.Current.Resources["PrimaryTextBrush"],
+        };
+        ThemeManager.ApplyTitleBar(dlg);
+
         var sp = new StackPanel { Margin = new Thickness(16) };
-        sp.Children.Add(new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
+        sp.Children.Add(new TextBlock
+        {
+            Text = prompt,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
+            Foreground = (System.Windows.Media.Brush)Application.Current.Resources["PrimaryTextBrush"],
+        });
         var tb = new TextBox { Text = defaultValue };
         sp.Children.Add(tb);
-        var bp = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var bp = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 12, 0, 0),
+        };
         var ok = new Button { Content = "确定", Width = 70, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
         ok.Click += (_, _) => { dlg.DialogResult = true; };
         bp.Children.Add(ok);

@@ -6,7 +6,7 @@
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Icon="../netfol.ico"
-        >
+        Background="{DynamicResource WindowBgBrush}">
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -50,7 +50,8 @@
         </Grid>
 
         <TextBlock Grid.Row="2" Grid.Column="1" x:Name="TbkPrefixInfo"
-                   FontSize="11" Margin="5,0,5,4" TextWrapping="Wrap" Foreground="DarkGreen" />
+                   FontSize="11" Margin="5,0,5,4" TextWrapping="Wrap"
+                   Foreground="{DynamicResource SuccessTextBrush}" />
 
         <Label Grid.Row="3" Grid.Column="0" Content="下一跳：" VerticalAlignment="Center" />
         <TextBox Grid.Row="3" Grid.Column="1" x:Name="TxtNextHop" Margin="5"

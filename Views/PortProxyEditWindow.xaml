@@ -5,7 +5,8 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
-        Icon="../netfol.ico">
+        Icon="../netfol.ico"
+        Background="{DynamicResource WindowBgBrush}">
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />

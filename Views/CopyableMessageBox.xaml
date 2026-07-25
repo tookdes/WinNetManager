@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="提示" Height="300" Width="460"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
-        KeyDown="Window_KeyDown" MinHeight="150" MinWidth="300">
+        KeyDown="Window_KeyDown" MinHeight="150" MinWidth="300"
+        Background="{DynamicResource WindowBgBrush}">
     <DockPanel Margin="12">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button Content="复制全部" Padding="12,4" Margin="0,0,8,0" Click="BtnCopy_Click"/>
