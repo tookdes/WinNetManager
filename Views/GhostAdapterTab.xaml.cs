@@ -14,26 +14,27 @@ public partial class GhostAdapterTab : UserControl
     {
         InitializeComponent();
         AdapterGrid.ItemsSource = _adapters;
-        Loaded += (_, _) => RefreshData();
+        Loaded += async (_, _) => await RefreshDataAsync();
     }
 
-    private void RefreshData()
+    private async Task RefreshDataAsync()
     {
         try
         {
+            var adapters = await Task.Run(() => GhostAdapterService.GetAllNetworkAdapters());
             _adapters.Clear();
-            foreach (var a in GhostAdapterService.GetAllNetworkAdapters()) _adapters.Add(a);
+            foreach (var a in adapters) _adapters.Add(a);
             int ghosts = _adapters.Count(a => !a.IsPresent);
             SetStatus($"已加载 {_adapters.Count} 个网络适配器（{ghosts} 个幽灵设备）");
             EmptyState.Visibility = _adapters.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
-        catch (Exception ex) { CopyableMessageBox.Show($"枚举网络适配器失败：\n{ex.Message}"); }
+        catch (Exception ex) { CopyableMessageBox.Show($"枚举网络适配器失败：\n{ex.Message}", "错误", MessageBoxImage.Error); }
     }
 
     private List<GhostAdapter> GetSelected() =>
         AdapterGrid.SelectedItems.Cast<GhostAdapter>().ToList();
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshDataAsync();
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => AdapterGrid.SelectAll();
     private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.InvertSelection(AdapterGrid, _adapters);
@@ -83,7 +84,7 @@ public partial class GhostAdapterTab : UserControl
         }
     }
 
-    private void BtnRemove_Click(object sender, RoutedEventArgs e)
+    private async void BtnRemove_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected().Where(a => !a.IsPresent).ToList();
         if (sel.Count == 0) { CopyableMessageBox.Show("请选中要卸载的幽灵设备。\n活跃设备不能通过此方式卸载。\n\n注意：WAN Miniport 等系统虚拟设备不应卸载。"); return; }
@@ -99,7 +100,7 @@ public partial class GhostAdapterTab : UserControl
         string msg = $"卸载完成：成功 {ok}，失败 {fail}";
         CopyableMessageBox.Show(msg, "卸载结果", fail > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
         SetStatus(msg);
-        RefreshData();
+        await RefreshDataAsync();
     }
 
     private void MenuCopy_Click(object sender, RoutedEventArgs e) => NetworkProfileTab.CopySelectedCellValue(AdapterGrid);

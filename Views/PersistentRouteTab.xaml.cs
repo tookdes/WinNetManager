@@ -51,26 +51,11 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
         }
     }
 
-    private void LoadRoutes()
-    {
-        try
-        {
-            _allRoutes = _manager.GetPersistentRoutes();
-            _originalSnapshots.Clear();
-            foreach (var route in _allRoutes)
-                _originalSnapshots[route] = route.Clone();
-
-            _routeView = CollectionViewSource.GetDefaultView(_allRoutes);
-            _routeView.Filter = RouteFilter;
-            RoutesGrid.ItemsSource = _routeView;
-            UpdateCount();
-            EmptyState.Visibility = _allRoutes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        }
-        catch (Exception ex)
-        {
-            CopyableMessageBox.Show($"加载路由失败：{ex.Message}", "错误", MessageBoxImage.Error);
-        }
-    }
+    /// <summary>
+    /// 是否有尚未应用的持久路由更改（用于关闭窗口前的提醒）。
+    /// </summary>
+    public bool HasPendingChanges =>
+        _allRoutes?.Any(r => r.Status != ChangeStatus.Unchanged) ?? false;
 
     private bool RouteFilter(object obj)
     {
@@ -242,7 +227,7 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
             .ToList();
         if (validationErrors.Count > 0)
         {
-            CopyableMessageBox.Show("Invalid routes detected. Apply was stopped:\n\n" + string.Join("\n", validationErrors), "Invalid Input", MessageBoxImage.Warning);
+            CopyableMessageBox.Show("检测到无效路由，已停止应用更改：\n\n" + string.Join("\n", validationErrors), "无效输入", MessageBoxImage.Warning);
             return;
         }
 
@@ -562,7 +547,7 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
             {
                 if (invalidRoutes.Count > 0)
                 {
-                    CopyableMessageBox.Show($"No valid routes were found in the config file.\n\nInvalid items:\n{string.Join("\n", invalidRoutes)}", "Import Failed", MessageBoxImage.Warning);
+                    CopyableMessageBox.Show($"配置文件中没有可导入的有效路由。\n\n无效项：\n{string.Join("\n", invalidRoutes)}", "导入失败", MessageBoxImage.Warning);
                     return;
                 }
 
@@ -598,7 +583,7 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
 
             if (invalidRoutes.Count > 0)
             {
-                sb.AppendLine($"Invalid items skipped: {invalidRoutes.Count}");
+                sb.AppendLine($"跳过无效项：{invalidRoutes.Count} 条");
                 foreach (var item in invalidRoutes)
                     sb.AppendLine($"  - {item}");
                 sb.AppendLine();

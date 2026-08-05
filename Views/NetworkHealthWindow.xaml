@@ -21,7 +21,7 @@
                     <ComboBoxItem Content="正常" Tag="None"/>
                 </ComboBox>
                 <TextBox x:Name="TxtFilter" Width="140" Padding="4,2" Margin="0,0,4,0"
-                         TextChanged="TxtFilter_TextChanged" ToolTip="按类别/名称/详情筛选"/>
+                         TextChanged="TxtFilter_TextChanged" Tag="Filter" ToolTip="按类别/名称/详情筛选"/>
                 <Button Content="清除" Padding="8,3" Click="BtnClearFilter_Click"/>
                 <Button Content="复制全部" Padding="8,3" Margin="8,0,0,0" Click="BtnCopyAll_Click"/>
                 <Button Content="关闭" Padding="12,3" Margin="4,0,0,0" Click="BtnClose_Click"/>

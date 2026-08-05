@@ -114,6 +114,9 @@ public static class ProcessRunner
     /// Kills the process if it exceeds the timeout.
     /// </summary>
     public static string RunPowerShell(string script, out string error, int timeoutMs = 30000)
+        => RunPowerShell(script, out error, out _, timeoutMs);
+
+    public static string RunPowerShell(string script, out string error, out int exitCode, int timeoutMs = 30000)
     {
         string wrapped =
             "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
@@ -124,7 +127,7 @@ public static class ProcessRunner
         byte[] bytes = Encoding.Unicode.GetBytes(wrapped);
         string encoded = Convert.ToBase64String(bytes);
         string args = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}";
-        return Run("powershell.exe", args, out error, timeoutMs);
+        return Run("powershell.exe", args, out error, out exitCode, timeoutMs);
     }
 
     /// <summary>

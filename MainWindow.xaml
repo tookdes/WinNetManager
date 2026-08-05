@@ -27,7 +27,7 @@
                     <Button Content="设备管理器" Padding="8,2" FontSize="11" Margin="6,0,0,0" Click="BtnDevMgr_Click"
                             ToolTip="打开设备管理器 (devmgmt.msc)"/>
                     <Button Content="备份注册表" Padding="8,2" FontSize="11" Margin="6,0,0,0" Click="BtnBackup_Click"
-                            ToolTip="一键备份所有网络相关注册表"/>
+                            ToolTip="一键备份网络相关注册表、路由与端口转发配置"/>
                     <Button Content="防火墙" Padding="8,2" FontSize="11" Margin="6,0,0,0" Click="BtnFirewall_Click"
                             ToolTip="打开 Windows Defender 防火墙高级安全 (wf.msc)"/>
                     <Button Content="Hosts" Padding="8,2" FontSize="11" Margin="6,0,0,0" Click="BtnHosts_Click"

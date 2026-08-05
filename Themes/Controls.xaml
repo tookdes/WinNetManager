@@ -77,10 +77,31 @@
                                         BorderBrush="{TemplateBinding BorderBrush}"
                                         BorderThickness="{TemplateBinding BorderThickness}"
                                         Padding="{TemplateBinding Padding}">
-                                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                                      VerticalAlignment="Center"
-                                                      TextElement.Foreground="{TemplateBinding Foreground}"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                          VerticalAlignment="Center"
+                                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                                        <Path Grid.Column="1" x:Name="SortArrow"
+                                              Data="M0,0 L5,0 L2.5,4 Z"
+                                              Fill="{DynamicResource SecondaryTextBrush}"
+                                              VerticalAlignment="Center" Margin="6,0,0,0"
+                                              Visibility="Collapsed"/>
+                                    </Grid>
                                 </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="SortDirection" Value="Ascending">
+                                        <Setter TargetName="SortArrow" Property="Data" Value="M0,4 L5,4 L2.5,0 Z"/>
+                                        <Setter TargetName="SortArrow" Property="Visibility" Value="Visible"/>
+                                    </Trigger>
+                                    <Trigger Property="SortDirection" Value="Descending">
+                                        <Setter TargetName="SortArrow" Property="Data" Value="M0,0 L5,0 L2.5,4 Z"/>
+                                        <Setter TargetName="SortArrow" Property="Visibility" Value="Visible"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
                             </ControlTemplate>
                         </Setter.Value>
                     </Setter>
@@ -205,6 +226,24 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+        <!-- 筛选框水印：Tag="Filter" 且文本为空时显示暗色提示 -->
+        <Style.Triggers>
+            <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Filter"/>
+                    <Condition Binding="{Binding Text, RelativeSource={RelativeSource Self}}" Value=""/>
+                </MultiDataTrigger.Conditions>
+                <Setter Property="Background">
+                    <Setter.Value>
+                        <VisualBrush Stretch="None" AlignmentX="Left" AlignmentY="Center">
+                            <VisualBrush.Visual>
+                                <TextBlock Text="筛选…" Foreground="#FF999999" FontSize="12" Margin="4,0,0,0"/>
+                            </VisualBrush.Visual>
+                        </VisualBrush>
+                    </Setter.Value>
+                </Setter>
+            </MultiDataTrigger>
+        </Style.Triggers>
     </Style>
 
     <!-- ========== ComboBox（完整模板，覆盖系统浅色 chrome） ========== -->

@@ -10,6 +10,13 @@ public partial class CopyableMessageBox : Window
         InitializeComponent();
         Title = title;
         TxtContent.Text = message;
+        TxtIcon.Text = icon switch
+        {
+            MessageBoxImage.Error => "❌",           // ❌ = 错误
+            MessageBoxImage.Warning => "⚠️",   // 警告
+            MessageBoxImage.Question => "❓",        // 问题
+            _ => "ℹ️"                          // 提示
+        };
     }
 
     private void BtnCopy_Click(object sender, RoutedEventArgs e)

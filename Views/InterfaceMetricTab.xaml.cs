@@ -56,34 +56,6 @@ public partial class InterfaceMetricTab : UserControl, IRefreshableTab
         }
     }
 
-    private void LoadData()
-    {
-        try
-        {
-            _allMetrics = _manager.GetMetrics();
-            _allMetrics.Sort((a, b) => a.InterfaceMetric.CompareTo(b.InterfaceMetric));
-            _view = CollectionViewSource.GetDefaultView(_allMetrics);
-            _view.Filter = MetricFilter;
-            MetricGrid.ItemsSource = _view;
-
-            _allGateways = _manager.GetGatewayMetrics();
-            _gatewayView = CollectionViewSource.GetDefaultView(_allGateways);
-            _gatewayView.Filter = GatewayFilter;
-            if (_gatewayView is ListCollectionView lcvGw)
-                lcvGw.CustomSort = new NaturalSortByProperty("RouteMetric", ListSortDirection.Ascending);
-            else
-                _gatewayView.SortDescriptions.Add(new SortDescription("RouteMetric", ListSortDirection.Ascending));
-            GatewayGrid.ItemsSource = _gatewayView;
-
-            UpdateCount();
-            EmptyState.Visibility = (_allMetrics.Count == 0 && _allGateways.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
-        }
-        catch (Exception ex)
-        {
-            CopyableMessageBox.Show($"加载网卡跃点信息失败：{ex.Message}", "错误", MessageBoxImage.Error);
-        }
-    }
-
     private bool MetricFilter(object obj)
     {
         if (obj is not InterfaceMetricInfo item) return false;

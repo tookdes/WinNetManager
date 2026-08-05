@@ -53,30 +53,6 @@ public partial class DnsTab : UserControl, IRefreshableTab
         }
     }
 
-    private void RefreshData()
-    {
-        try
-        {
-            _rules.Clear();
-            foreach (var r in _manager.GetRules())
-                _rules.Add(r);
-            _nrptView = CollectionViewSource.GetDefaultView(_rules);
-            _nrptView.Filter = NrptFilter;
-            NrptGrid.ItemsSource = _nrptView;
-
-            _allDns = _manager.GetInterfaceDnsServers();
-            _dnsView = CollectionViewSource.GetDefaultView(_allDns);
-            _dnsView.Filter = DnsFilter;
-            InterfaceDnsGrid.ItemsSource = _dnsView;
-
-            UpdateCount();
-        }
-        catch (Exception ex)
-        {
-            CopyableMessageBox.Show($"加载配置失败：{ex.Message}", "错误", MessageBoxImage.Error);
-        }
-    }
-
     private bool DnsFilter(object obj)
     {
         if (obj is not InterfaceDnsInfo item) return false;
@@ -140,6 +116,8 @@ public partial class DnsTab : UserControl, IRefreshableTab
         var res = await Task.Run(() => _manager.AddRule(ns, servers, comment));
         if (res.Success)
         {
+            if (Window.GetWindow(this) is MainWindow mw)
+                mw.SetCommandPreview(DnsNrptManager.GetAddRuleCommandPreview(ns, servers, comment));
             SetStatus($"已添加 NRPT 规则：{ns} -> {servers}");
             await RefreshDataAsync();
         }
@@ -174,6 +152,8 @@ public partial class DnsTab : UserControl, IRefreshableTab
         int ok = results.Count(r => r.result.Success);
         var errors = results.Where(r => !r.result.Success)
             .Select(r => $"{r.rule.Namespace}: {r.result.Message}").ToList();
+        var previews = results.Where(r => r.result.Success)
+            .Select(r => DnsNrptManager.GetDeleteRuleCommandPreview(r.rule.Name, r.rule.GpoName)).ToList();
 
         if (errors.Count > 0)
         {
@@ -184,6 +164,9 @@ public partial class DnsTab : UserControl, IRefreshableTab
         {
             SetStatus($"已删除 {ok}/{selected.Count} 条 NRPT 规则");
         }
+
+        if (previews.Count > 0 && Window.GetWindow(this) is MainWindow mw)
+            mw.SetCommandPreview(string.Join("\n", previews));
 
         await RefreshDataAsync();
     }

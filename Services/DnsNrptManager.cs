@@ -256,6 +256,26 @@ public class DnsNrptManager
         };
     }
 
+    public static string GetAddRuleCommandPreview(string ns, string dnsServers, string? comment = null)
+    {
+        var serverParts = dnsServers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var escapedServers = string.Join(",", serverParts.Select(s => $"'{ProcessRunner.EscapePsSingleQuoted(s)}'"));
+        var sb = new StringBuilder();
+        sb.Append($"Add-DnsClientNrptRule -Namespace '{ProcessRunner.EscapePsSingleQuoted(ns)}' -NameServers {escapedServers}");
+        if (!string.IsNullOrEmpty(comment))
+            sb.Append($" -Comment '{ProcessRunner.EscapePsSingleQuoted(comment)}'");
+        return sb.ToString();
+    }
+
+    public static string GetDeleteRuleCommandPreview(string name, string gpoName)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"Remove-DnsClientNrptRule -Name '{ProcessRunner.EscapePsSingleQuoted(name)}' -Confirm:$false");
+        if (!string.IsNullOrEmpty(gpoName))
+            sb.Append($" -GpoName '{ProcessRunner.EscapePsSingleQuoted(gpoName)}'");
+        return sb.ToString();
+    }
+
     private static string TranslateError(string error)
     {
         if (CI(error, "Access is denied") || CI(error, "拒绝访问") || CI(error, "requires elevation"))

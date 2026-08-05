@@ -32,6 +32,7 @@ public static class NetworkHealthService
 
         // 批量查询所有服务状态，避免后续每个服务单独启动 PowerShell
         InitServiceCache();
+        InitDriverCache();
 
         try { CollectDrivers(items); } catch { }
         try { CollectTun(items); } catch { }
@@ -294,12 +295,17 @@ public static class NetworkHealthService
             string? proxyOverride = key.GetValue("ProxyOverride") as string;
             string? autoConfigUrl = key.GetValue("AutoConfigURL") as string;
 
-            // WinHTTP proxy — netsh 输出系统区域编码(OEM)，直接 Run 用 UTF-8 读会乱码，
-            // 改用 RunPowerShell 让 PS 把子进程输出重新编码为 UTF-8
+            // WinHTTP proxy — netsh 输出使用系统 OEM 代码页（中文系统为 GBK），
+            // 先临时把 Console 输出编码切到 OEM 代码页捕获 netsh 输出，再切回 UTF-8 输出，
+            // 避免中文系统上解码乱码导致误报。
             string? winHttpProxy = null;
             try
             {
-                string output = ProcessRunner.RunPowerShell("netsh winhttp show proxy", out _, 5000);
+                string output = ProcessRunner.RunPowerShell(
+                    "try { $oem = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::InstalledUICulture.TextInfo.OEMCodePage); " +
+                    "[Console]::OutputEncoding = $oem; $r = & netsh winhttp show proxy; " +
+                    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $r } catch { $null }",
+                    out _, 5000);
                 if (!string.IsNullOrWhiteSpace(output))
                     winHttpProxy = output.Trim();
             }
@@ -475,11 +481,11 @@ public static class NetworkHealthService
     private static void CollectServices(List<NetworkHealthItem> items)
     {
         // IP Helper - critical for IPv6/Teredo/ISATAP
-        CheckService(items, "iphlpsvc", "IP Helper", "提供 IPv6 转换技术（6to4, ISATAP, Teredo, IP-HTTPS）。停止将禁用这些功能。");
+        CheckService(items, "iphlpsvc", "IP Helper", "提供 IPv6 转换技术（6to4, ISATAP, Teredo, IP-HTTPS）。停止将禁用这些功能。", warnWhenStopped: true);
         // DNS Client
-        CheckService(items, "Dnscache", "DNS Client", "DNS 解析缓存服务。");
+        CheckService(items, "Dnscache", "DNS Client", "DNS 解析缓存服务。", warnWhenStopped: true);
         // DHCP Client
-        CheckService(items, "Dhcp", "DHCP Client", "DHCP 客户端，自动获取 IP 地址。");
+        CheckService(items, "Dhcp", "DHCP Client", "DHCP 客户端，自动获取 IP 地址。", warnWhenStopped: true);
         // SSDP Discovery (UPnP)
         CheckService(items, "SSDPSRV", "SSDP Discovery", "UPnP 设备发现。");
         // Function Discovery Resource Publication
@@ -714,17 +720,18 @@ public static class NetworkHealthService
 
     // ------------------------------ Helpers ------------------------------
 
-    private static void CheckService(List<NetworkHealthItem> items, string serviceName, string displayName, string description)
+    private static void CheckService(List<NetworkHealthItem> items, string serviceName, string displayName, string description, bool warnWhenStopped = false)
     {
         if (!ServiceExists(serviceName)) return;
-        string st = ServiceRunning(serviceName) ? "运行中" : "已停止";
+        bool running = ServiceRunning(serviceName);
+        string st = running ? "运行中" : "已停止";
         items.Add(new NetworkHealthItem
         {
             Category = "系统服务",
             Name = displayName,
             Status = st,
             Detail = description,
-            Risk = "None"
+            Risk = (!running && warnWhenStopped) ? "Warn" : "None"
         });
     }
 
@@ -756,6 +763,33 @@ public static class NetworkHealthService
     private static bool ServiceExists(string serviceName)
         => _serviceCache.ContainsKey(serviceName);
 
+    // 驱动加载状态缓存 — driverquery 只跑一次，避免每个 TUN/WinDivert 条目单独启动进程
+    private static HashSet<string> _loadedDrivers = new(StringComparer.OrdinalIgnoreCase);
+
+    private static void InitDriverCache()
+    {
+        _loadedDrivers.Clear();
+        try
+        {
+            string output = ProcessRunner.Run("driverquery", "/FO CSV /SVC", out _, 8000);
+            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                if (!line.StartsWith("\"")) continue;
+                var parts = CsvParser.ParseLine(line);
+                if (parts.Length >= 4)
+                {
+                    string svcName = parts[3].Trim();
+                    string state = parts[2].Trim();
+                    if (state.Contains("Running", StringComparison.OrdinalIgnoreCase) ||
+                        state.Contains("正在运行", StringComparison.OrdinalIgnoreCase))
+                        _loadedDrivers.Add(svcName);
+                }
+            }
+        }
+        catch { }
+    }
+
     private static bool ServiceRunning(string serviceName)
         => _serviceCache.TryGetValue(serviceName, out var status)
            && status.Equals("Running", StringComparison.OrdinalIgnoreCase);
@@ -778,42 +812,13 @@ public static class NetworkHealthService
         return names;
     }
 
-    private static bool AdapterNameContains(string keyword)
-    {
-        return GetAdapterNames().Any(n => n.Contains(keyword, StringComparison.OrdinalIgnoreCase));
-    }
-
     /// <summary>
-    /// 通过 driverquery /SVC 精确确认驱动是否在内核中加载。
+    /// 通过 driverquery /SVC 精确确认驱动是否在内核中加载（从缓存查询）。
     /// /SVC 格式：显示名   类型   状态   服务名（最后一列是精确的驱动服务名）。
     /// 必须精确匹配最后一列，避免子串误报。
     /// </summary>
     private static bool IsDriverLoaded(string serviceName)
-    {
-        try
-        {
-            string output = ProcessRunner.Run("driverquery", "/FO CSV /SVC", out _, 8000);
-            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var line in lines)
-            {
-                if (line.StartsWith("\"")) // 跳过表头
-                {
-                    var parts = ParseCsvLine(line);
-                    if (parts.Length >= 4)
-                    {
-                        // CSV: "显示名","类型","状态","服务名"
-                        string svcName = parts[3].Trim();
-                        string state = parts[2].Trim();
-                        if (svcName.Equals(serviceName, StringComparison.OrdinalIgnoreCase) &&
-                            (state.Contains("Running", StringComparison.OrdinalIgnoreCase) || state.Contains("正在运行", StringComparison.OrdinalIgnoreCase)))
-                            return true;
-                    }
-                }
-            }
-            return false;
-        }
-        catch { return false; }
-    }
+        => _loadedDrivers.Contains(serviceName);
 
     private static string[] ParseCsvLine(string line) => CsvParser.ParseLine(line);
 }

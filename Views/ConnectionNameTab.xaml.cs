@@ -14,30 +14,31 @@ public partial class ConnectionNameTab : UserControl
     {
         InitializeComponent();
         ConnectionGrid.ItemsSource = _connections;
-        Loaded += (_, _) => RefreshData();
+        Loaded += async (_, _) => await RefreshDataAsync();
     }
 
-    private void RefreshData()
+    private async Task RefreshDataAsync()
     {
         try
         {
+            var connections = await Task.Run(() => ConnectionNameService.GetAllConnections());
             _connections.Clear();
-            foreach (var c in ConnectionNameService.GetAllConnections()) _connections.Add(c);
+            foreach (var c in connections) _connections.Add(c);
             SetStatus($"已加载 {_connections.Count} 个连接");
             EmptyState.Visibility = _connections.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
-        catch (Exception ex) { CopyableMessageBox.Show($"读取连接信息失败：\n{ex.Message}"); }
+        catch (Exception ex) { CopyableMessageBox.Show($"读取连接信息失败：\n{ex.Message}", "错误", MessageBoxImage.Error); }
     }
 
     private List<ConnectionInfo> GetSelected() =>
         ConnectionGrid.SelectedItems.Cast<ConnectionInfo>().ToList();
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshDataAsync();
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => ConnectionGrid.SelectAll();
     private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.InvertSelection(ConnectionGrid, _connections);
 
-    private void BtnRename_Click(object sender, RoutedEventArgs e)
+    private async void BtnRename_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected();
         if (sel.Count != 1) { CopyableMessageBox.Show("请选择一个连接进行重命名。"); return; }
@@ -46,16 +47,21 @@ public partial class ConnectionNameTab : UserControl
         if (n == null || n == c.Name) return;
         try
         {
-            ConnectionNameService.RenameConnection(c.Guid, n);
-            SetStatus($"已将 \"{c.Name}\" 重命名为 \"{n}\"");
-            RefreshData();
+            var (ok, msg) = ConnectionNameService.RenameConnection(c.Guid, n);
+            if (!ok)
+            {
+                CopyableMessageBox.Show($"重命名失败：\n{msg}", "错误", MessageBoxImage.Error);
+                return;
+            }
+            SetStatus(msg);
+            await RefreshDataAsync();
             // 通知其他标签页刷新：它们缓存了旧的 InterfaceAlias，需要重新查询
             ConnectionNameService.RaiseConnectionsChanged();
         }
-        catch (Exception ex) { CopyableMessageBox.Show($"重命名失败：\n{ex.Message}"); }
+        catch (Exception ex) { CopyableMessageBox.Show($"重命名失败：\n{ex.Message}", "错误", MessageBoxImage.Error); }
     }
 
-    private void BtnDelete_Click(object sender, RoutedEventArgs e)
+    private async void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected().Where(c => !c.HasActiveAdapter).ToList();
         if (sel.Count == 0) { CopyableMessageBox.Show("请选中至少一个无设备的连接条目进行删除。\n有活跃适配器的连接不能删除。"); return; }
@@ -65,7 +71,7 @@ public partial class ConnectionNameTab : UserControl
         int ok = 0;
         foreach (var c in sel) { try { ConnectionNameService.DeleteConnection(c.Guid); ok++; } catch { } }
         SetStatus($"已删除 {ok}/{sel.Count} 个连接条目");
-        RefreshData();
+        await RefreshDataAsync();
         ConnectionNameService.RaiseConnectionsChanged(); // 同上，通知其他标签页
     }
 

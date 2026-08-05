@@ -51,7 +51,7 @@ public static class ConnectionNameService
     /// Rename-NetAdapter 会通知网络栈同步更新 InterfaceAlias。
     /// 另外 Get-NetAdapter 不支持 -InterfaceGuid 参数，需先读旧名称按名查找。
     /// </summary>
-    public static void RenameConnection(Guid guid, string newName)
+    public static (bool Success, string Message) RenameConnection(Guid guid, string newName)
     {
         string keyPath = $@"{NetworkClassKeyPath}\{guid:B}\Connection";
 
@@ -65,22 +65,31 @@ public static class ConnectionNameService
         {
             string safeOld = ProcessRunner.EscapePsSingleQuoted(oldName);
             string safeNew = ProcessRunner.EscapePsSingleQuoted(newName);
+            // 显式探测适配器是否存在，避免管道为空时被误判为成功
             string script =
-                $"Get-NetAdapter -Name '{safeOld}' -ErrorAction SilentlyContinue | " +
-                $"Rename-NetAdapter -NewName '{safeNew}'";
+                $"$a = Get-NetAdapter -Name '{safeOld}' -ErrorAction SilentlyContinue; " +
+                $"if ($a) {{ $a | Rename-NetAdapter -NewName '{safeNew}'; Write-Output 'RENAMED_OK' }} " +
+                "else { Write-Output 'ADAPTER_NOT_FOUND' }";
             string error;
-            ProcessRunner.RunPowerShell(script, out error, 15000);
+            string output = ProcessRunner.RunPowerShell(script, out error, 15000);
 
-            bool success = string.IsNullOrEmpty(error)
-                || error.IndexOf("警告", StringComparison.OrdinalIgnoreCase) >= 0
-                || error.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool hasRealError = !string.IsNullOrEmpty(error)
+                && error.IndexOf("警告", StringComparison.OrdinalIgnoreCase) < 0
+                && error.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) < 0;
 
-            if (success) return;
+            if (output.Contains("RENAMED_OK", StringComparison.OrdinalIgnoreCase) && !hasRealError)
+                return (true, $"已将 \"{oldName}\" 重命名为 \"{newName}\"");
+
+            if (hasRealError)
+                return (false, error.Trim());
+
+            // ADAPTER_NOT_FOUND：网络栈中找不到该适配器，回退到注册表
         }
 
         // 回退：直接写注册表（网络栈不会立即感知，但下次重启后生效）
         using var key = Registry.LocalMachine.OpenSubKey(keyPath, writable: true);
         key?.SetValue("Name", newName);
+        return (true, $"已写入注册表（网络栈将在重启后感知新名称）：\"{newName}\"");
     }
 
     public static void DeleteConnection(Guid guid)

@@ -48,24 +48,6 @@ public partial class PortProxyTab : UserControl
         }
     }
 
-    private void RefreshData()
-    {
-        try
-        {
-            _allRules = _manager.GetRules();
-            _ruleView = CollectionViewSource.GetDefaultView(_allRules);
-            _ruleView.Filter = RuleFilter;
-            ProxyGrid.ItemsSource = _ruleView;
-            UpdateCount();
-            CheckServiceStatus();
-            EmptyState.Visibility = _allRules.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        }
-        catch (Exception ex)
-        {
-            CopyableMessageBox.Show($"加载端口转发规则失败：{ex.Message}", "错误", MessageBoxImage.Error);
-        }
-    }
-
     private void CheckServiceStatus()
     {
         bool running = _manager.IsServiceRunning();
@@ -342,21 +324,24 @@ public partial class PortProxyTab : UserControl
 
     // --- 导入导出 ---
 
-    private void BtnExport_Click(object sender, RoutedEventArgs e)
+    private async void BtnExport_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new Microsoft.Win32.SaveFileDialog
-        {
-            Title = "导出端口转发配置",
-            FileName = $"WinNetManager_Proxy_{DateTime.Now:yyyyMMdd}",
-            DefaultExt = ".json",
-            Filter = "JSON 文件 (*.json)|*.json",
-        };
-
-        if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
-
+        var btn = sender as Button;
+        if (btn != null) btn.IsEnabled = false;
         try
         {
-            var currentRules = _manager.GetRules();
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "导出端口转发配置",
+                FileName = $"WinNetManager_Proxy_{DateTime.Now:yyyyMMdd}",
+                DefaultExt = ".json",
+                Filter = "JSON 文件 (*.json)|*.json",
+            };
+
+            if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
+
+            SetStatus("正在导出端口转发配置...");
+            var currentRules = await Task.Run(() => _manager.GetRules());
             var config = new WinNetConfig
             {
                 PortProxyRules = ConfigExportService.ToProxyConfigs(currentRules),
@@ -371,20 +356,26 @@ public partial class PortProxyTab : UserControl
         {
             CopyableMessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
+        finally
+        {
+            if (btn != null) btn.IsEnabled = true;
+        }
     }
 
-    private void BtnImport_Click(object sender, RoutedEventArgs e)
+    private async void BtnImport_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new Microsoft.Win32.OpenFileDialog
-        {
-            Title = "导入端口转发配置",
-            Filter = "JSON 文件 (*.json)|*.json|所有文件 (*.*)|*.*",
-        };
-
-        if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
-
+        var btn = sender as Button;
+        if (btn != null) btn.IsEnabled = false;
         try
         {
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "导入端口转发配置",
+                Filter = "JSON 文件 (*.json)|*.json|所有文件 (*.*)|*.*",
+            };
+
+            if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
+
             var config = ConfigExportService.Import(dlg.FileName);
             var importedRules = ConfigExportService.ToProxyRules(config.PortProxyRules);
 
@@ -394,7 +385,8 @@ public partial class PortProxyTab : UserControl
                 return;
             }
 
-            RefreshData();
+            SetStatus("正在导入端口转发配置...");
+            var currentRules = await Task.Run(() => _manager.GetRules());
 
             var toAdd = new List<PortProxyRule>();
             var toOverwrite = new List<(PortProxyRule OldRule, PortProxyRule NewRule)>();
@@ -402,7 +394,7 @@ public partial class PortProxyTab : UserControl
 
             foreach (var imported in importedRules)
             {
-                var exactMatch = _allRules.FirstOrDefault(r =>
+                var exactMatch = currentRules.FirstOrDefault(r =>
                     r.Direction == imported.Direction &&
                     r.ListenAddress == imported.ListenAddress &&
                     r.ListenPort == imported.ListenPort &&
@@ -415,7 +407,7 @@ public partial class PortProxyTab : UserControl
                     continue;
                 }
 
-                var keyMatch = _allRules.FirstOrDefault(r => r.EqualsWithKeys(imported));
+                var keyMatch = currentRules.FirstOrDefault(r => r.EqualsWithKeys(imported));
                 if (keyMatch != null)
                 {
                     toOverwrite.Add((keyMatch, imported));
@@ -429,7 +421,7 @@ public partial class PortProxyTab : UserControl
             // 无冲突时直接添加
             if (toOverwrite.Count == 0)
             {
-                ExecuteImport(toAdd, new List<(PortProxyRule, PortProxyRule)>(), skipped);
+                await ExecuteImportAsync(toAdd, new List<(PortProxyRule, PortProxyRule)>(), skipped);
                 return;
             }
 
@@ -451,20 +443,26 @@ public partial class PortProxyTab : UserControl
             if (result == MessageBoxResult.Cancel) return;
 
             bool overwrite = result == MessageBoxResult.Yes;
-            ExecuteImport(toAdd, overwrite ? toOverwrite : new List<(PortProxyRule, PortProxyRule)>(), skipped);
+            await ExecuteImportAsync(toAdd, overwrite ? toOverwrite : new List<(PortProxyRule, PortProxyRule)>(), skipped);
         }
         catch (Exception ex)
         {
             CopyableMessageBox.Show($"导入失败：{ex.Message}", "错误", MessageBoxImage.Error);
         }
+        finally
+        {
+            if (btn != null) btn.IsEnabled = true;
+        }
     }
 
-    private void ExecuteImport(List<PortProxyRule> toAdd, List<(PortProxyRule OldRule, PortProxyRule NewRule)> toOverwrite, int skipped)
+    private async Task ExecuteImportAsync(List<PortProxyRule> toAdd, List<(PortProxyRule OldRule, PortProxyRule NewRule)> toOverwrite, int skipped)
     {
         int ok = 0;
         var errors = new List<string>();
         var warnings = new List<string>();
 
+        await Task.Run(() =>
+        {
         foreach (var rule in toAdd)
         {
             if (!PortProxyManager.ValidateRule(rule, out string valErr))
@@ -518,8 +516,9 @@ public partial class PortProxyTab : UserControl
                     warnings.Add($"新规则添加失败，旧规则回滚：端口转发{(rbRes.Success ? "成功" : "失败")}，防火墙{(rbFw.Success ? "成功" : "失败")}");
             }
         }
+        });
 
-        RefreshData();
+        await RefreshDataAsync();
 
         var msg = $"导入完成：成功 {ok} 条，跳过 {skipped} 条。";
         if (warnings.Count > 0)

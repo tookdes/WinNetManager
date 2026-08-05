@@ -14,30 +14,31 @@ public partial class DeviceDescriptionTab : UserControl
     {
         InitializeComponent();
         DescGrid.ItemsSource = _descriptions;
-        Loaded += (_, _) => RefreshData();
+        Loaded += async (_, _) => await RefreshDataAsync();
     }
 
-    private void RefreshData()
+    private async Task RefreshDataAsync()
     {
         try
         {
+            var descriptions = await Task.Run(() => DeviceDescriptionService.GetAllDescriptions());
             _descriptions.Clear();
-            foreach (var d in DeviceDescriptionService.GetAllDescriptions()) _descriptions.Add(d);
+            foreach (var d in descriptions) _descriptions.Add(d);
             SetStatus($"已加载 {_descriptions.Count} 个设备描述");
             EmptyState.Visibility = _descriptions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
-        catch (Exception ex) { CopyableMessageBox.Show($"读取设备描述失败：\n{ex.Message}"); }
+        catch (Exception ex) { CopyableMessageBox.Show($"读取设备描述失败：\n{ex.Message}", "错误", MessageBoxImage.Error); }
     }
 
     private List<DeviceDescription> GetSelected() =>
         DescGrid.SelectedItems.Cast<DeviceDescription>().ToList();
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshDataAsync();
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => DescGrid.SelectAll();
     private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.InvertSelection(DescGrid, _descriptions);
 
-    private void BtnReset_Click(object sender, RoutedEventArgs e)
+    private async void BtnReset_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected();
         if (sel.Count == 0) { CopyableMessageBox.Show("请先选中至少一个设备描述进行重置。"); return; }
@@ -47,10 +48,10 @@ public partial class DeviceDescriptionTab : UserControl
         int ok = 0;
         foreach (var d in sel) { try { DeviceDescriptionService.ResetCounter(d.Name); ok++; } catch { } }
         SetStatus($"已重置 {ok}/{sel.Count} 个设备描述");
-        RefreshData();
+        await RefreshDataAsync();
     }
 
-    private void BtnDelete_Click(object sender, RoutedEventArgs e)
+    private async void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected();
         if (sel.Count == 0) { CopyableMessageBox.Show("请先选中至少一个设备描述进行删除。"); return; }
@@ -60,7 +61,7 @@ public partial class DeviceDescriptionTab : UserControl
         int ok = 0;
         foreach (var d in sel) { try { DeviceDescriptionService.DeleteDescription(d.Name); ok++; } catch { } }
         SetStatus($"已删除 {ok}/{sel.Count} 个设备描述条目");
-        RefreshData();
+        await RefreshDataAsync();
     }
 
     private void MenuCopy_Click(object sender, RoutedEventArgs e) => NetworkProfileTab.CopySelectedCellValue(DescGrid);

@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 using WinNetManager.Models;
 using WinNetManager.Services;
 
@@ -14,16 +16,18 @@ public partial class NetworkProfileTab : UserControl
     {
         InitializeComponent();
         ProfileGrid.ItemsSource = _profiles;
-        Loaded += (_, _) => RefreshData();
+        Loaded += async (_, _) => await RefreshDataAsync();
     }
 
-    private void RefreshData()
+    private async Task RefreshDataAsync()
     {
         try
         {
-            _profiles.Clear();
-            var profiles = NetworkProfileService.GetAllProfiles();
+            // 注册表读取放后台线程；COM 调用必须在 STA 的 UI 线程执行
+            var profiles = await Task.Run(() => NetworkProfileService.GetAllProfiles());
             var connectedIds = NetworkListManagerService.GetConnectedNetworkIds();
+
+            _profiles.Clear();
             foreach (var p in profiles)
             {
                 p.IsConnected = connectedIds.Contains(p.Guid);
@@ -41,14 +45,14 @@ public partial class NetworkProfileTab : UserControl
     private List<NetworkProfile> GetSelected() =>
         ProfileGrid.SelectedItems.Cast<NetworkProfile>().ToList();
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshData();
+    private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await RefreshDataAsync();
 
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => ProfileGrid.SelectAll();
 
     private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
         InvertSelection(ProfileGrid, _profiles);
 
-    private void BtnRename_Click(object sender, RoutedEventArgs e)
+    private async void BtnRename_Click(object sender, RoutedEventArgs e)
     {
         var selected = GetSelected();
         if (selected.Count != 1) { CopyableMessageBox.Show("请选择一个配置文件进行重命名。"); return; }
@@ -63,7 +67,7 @@ public partial class NetworkProfileTab : UserControl
                 return;
             }
             SetStatus($"已将 \"{p.ProfileName}\" 重命名为 \"{n}\"");
-            RefreshData();
+            await RefreshDataAsync();
         }
         catch (Exception ex) { CopyableMessageBox.Show($"重命名失败：\n{ex.Message}"); }
     }
@@ -71,7 +75,7 @@ public partial class NetworkProfileTab : UserControl
     private void BtnSetPublic_Click(object sender, RoutedEventArgs e) => SetCategory(NetworkCategory.Public);
     private void BtnSetPrivate_Click(object sender, RoutedEventArgs e) => SetCategory(NetworkCategory.Private);
 
-    private void SetCategory(NetworkCategory cat)
+    private async void SetCategory(NetworkCategory cat)
     {
         var sel = GetSelected();
         if (sel.Count == 0) { CopyableMessageBox.Show("请先选中至少一个配置文件。"); return; }
@@ -88,10 +92,10 @@ public partial class NetworkProfileTab : UserControl
             catch { }
         }
         SetStatus($"已将 {ok}/{sel.Count} 个网络设为{cn}");
-        RefreshData();
+        await RefreshDataAsync();
     }
 
-    private void BtnDelete_Click(object sender, RoutedEventArgs e)
+    private async void BtnDelete_Click(object sender, RoutedEventArgs e)
     {
         var sel = GetSelected().Where(p => !p.IsConnected).ToList();
         if (sel.Count == 0) { CopyableMessageBox.Show("请选中至少一个未连接的历史配置文件进行删除。\n当前连接的网络不能删除。"); return; }
@@ -101,7 +105,7 @@ public partial class NetworkProfileTab : UserControl
         int ok = 0;
         foreach (var p in sel) { try { NetworkProfileService.DeleteProfile(p.Guid); ok++; } catch { } }
         SetStatus($"已删除 {ok}/{sel.Count} 个网络配置文件");
-        RefreshData();
+        await RefreshDataAsync();
     }
 
     private void MenuCopy_Click(object sender, RoutedEventArgs e) => CopySelectedCellValue(ProfileGrid);
@@ -152,13 +156,54 @@ public partial class NetworkProfileTab : UserControl
         }
     }
 
+    /// <summary>
+    /// 让右键点击表格时同步更新选中行与当前单元格，
+    /// 使「复制选中值」复制的是右键点击的那一格（WPF 默认右键不更新 CurrentCell）。
+    /// </summary>
+    internal static void HandleRightClick(DataGrid grid, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var pos = e.GetPosition(grid);
+        var row = FindRowAt(grid, pos);
+        if (row?.Item == null) return;
+
+        bool keepMulti = (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control
+                      || (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) == System.Windows.Input.ModifierKeys.Shift;
+        if (!keepMulti)
+        {
+            grid.SelectedItems.Clear();
+            grid.SelectedItems.Add(row.Item);
+        }
+        grid.CurrentItem = row.Item;
+
+        var col = FindColumnAt(grid, pos);
+        if (col != null)
+            grid.CurrentCell = new DataGridCellInfo(row.Item, col);
+    }
+
+    private static DataGridRow? FindRowAt(DataGrid grid, Point pos)
+    {
+        var hit = grid.InputHitTest(pos) as DependencyObject;
+        while (hit != null && hit is not DataGridRow)
+            hit = VisualTreeHelper.GetParent(hit);
+        return hit as DataGridRow;
+    }
+
+    private static DataGridColumn? FindColumnAt(DataGrid grid, Point pos)
+    {
+        var hit = grid.InputHitTest(pos) as DependencyObject;
+        while (hit != null && hit is not DataGridColumnHeader)
+            hit = VisualTreeHelper.GetParent(hit);
+        return (hit as DataGridColumnHeader)?.Column;
+    }
+
     internal static string? PromptInput(string title, string prompt, string defaultValue, Window? owner = null)
     {
         var dlg = new Window
         {
             Title = title,
-            Width = 400,
-            Height = 180,
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            MaxHeight = 520,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             ResizeMode = ResizeMode.NoResize,
             Owner = owner ?? Application.Current.MainWindow,
@@ -188,7 +233,18 @@ public partial class NetworkProfileTab : UserControl
         bp.Children.Add(ok);
         bp.Children.Add(new Button { Content = "取消", Width = 70, IsCancel = true });
         sp.Children.Add(bp);
-        dlg.Content = sp;
+
+        // 内容超高时滚动，避免长提示被裁剪
+        var scroll = new ScrollViewer
+        {
+            Content = sp,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        dlg.Content = scroll;
+
+        // 自动聚焦并全选默认值，方便直接重写
+        dlg.Loaded += (_, _) => { tb.Focus(); tb.SelectAll(); };
         return dlg.ShowDialog() == true ? tb.Text.Trim() : null;
     }
 }

@@ -19,7 +19,7 @@
                 <ComboBoxItem Content="IPv6→IPv6" Tag="v6tov6"/>
             </ComboBox>
             <TextBox x:Name="TxtFilter" Width="80" Margin="4,0,0,0" Padding="4,2"
-                     TextChanged="TxtFilter_TextChanged" ToolTip="筛选监听地址、目标地址、端口"/>
+                     TextChanged="TxtFilter_TextChanged" Tag="Filter" ToolTip="筛选监听地址、目标地址、端口"/>
             <Button Content="清除" Padding="8,4" Margin="4,0,0,0" Click="BtnClearFilter_Click"/>
             <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="导出" Padding="10,4" Margin="6,0,0,0" Click="BtnExport_Click"/>

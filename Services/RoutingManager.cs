@@ -360,23 +360,21 @@ public class RoutingManager
 
     private RouteCommandResult ExecuteNetsh(string netshCmd)
     {
-        string script = $"& {netshCmd}";
+        // 用 $LASTEXITCODE 判断 netsh 是否成功，避免依赖本地化输出文本（Ok./确定。）
+        string script = $"{netshCmd}; exit $LASTEXITCODE";
         string error;
-        string output = RunPowerShell(script, out error);
+        string output = ProcessRunner.RunPowerShell(script, out error, out int exitCode, 30000);
 
-        // netsh 成功时输出 "Ok." 或 "确定。"，按行检查避免多行输出导致精确匹配失败
-        var lines = (output + "\n" + error).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-        bool hasOk = lines.Any(l =>
-            l.Trim() == "Ok." || l.Trim() == "确定。" ||
-            l.Trim() == "Ok" || l.Trim() == "确定");
-        bool hasError = !string.IsNullOrWhiteSpace(error)
+        bool hasRealError = !string.IsNullOrWhiteSpace(error)
             && error.IndexOf("警告", StringComparison.OrdinalIgnoreCase) < 0
             && error.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) < 0;
 
-        if (hasOk && !hasError)
+        if (exitCode == 0 && !hasRealError)
             return new RouteCommandResult { Success = true, Message = output.Trim() };
 
         string msg = (output + " " + error).Trim();
+        if (string.IsNullOrWhiteSpace(msg))
+            msg = $"命令执行失败（退出码 {exitCode}）。";
         if (ContainsIgnoreCase(msg, "Access is denied") || ContainsIgnoreCase(msg, "拒绝访问") || ContainsIgnoreCase(msg, "需要提升的权限"))
             msg = "需要以管理员身份运行本程序。";
         else if (ContainsIgnoreCase(msg, "already exists") || ContainsIgnoreCase(msg, "已存在"))

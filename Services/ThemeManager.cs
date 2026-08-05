@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -29,13 +28,6 @@ public static class ThemeManager
         IsDark = dark;
         var app = Application.Current;
         if (app == null) return;
-
-        var existing = app.Resources.MergedDictionaries
-            .FirstOrDefault(d => d.Contains(ThemeDictTag) ||
-                                 d.Source?.OriginalString.Contains("/Themes/Light.xaml", StringComparison.OrdinalIgnoreCase) == true ||
-                                 d.Source?.OriginalString.Contains("/Themes/Dark.xaml", StringComparison.OrdinalIgnoreCase) == true ||
-                                 d.Source?.OriginalString.Contains("Themes/Light.xaml", StringComparison.OrdinalIgnoreCase) == true ||
-                                 d.Source?.OriginalString.Contains("Themes/Dark.xaml", StringComparison.OrdinalIgnoreCase) == true);
 
         // 按标记或路径移除旧主题字典
         for (int i = app.Resources.MergedDictionaries.Count - 1; i >= 0; i--)

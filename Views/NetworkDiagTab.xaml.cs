@@ -27,6 +27,7 @@ public partial class NetworkDiagTab : UserControl
     {
         try
         {
+            SetStatus("正在加载连接信息...");
             var (listeners, conns) = await Task.Run(() => (GetListeners(), GetEstablishedConnections()));
 
             _listeners.Clear();

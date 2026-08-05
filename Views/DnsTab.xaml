@@ -21,7 +21,7 @@
                 <ComboBoxItem Content="IPv6" Tag="IPv6"/>
             </ComboBox>
             <TextBox x:Name="TxtFilter" Width="100" Margin="4,0,0,0" Padding="4,2"
-                     TextChanged="TxtFilter_TextChanged" ToolTip="按名称筛选"/>
+                     TextChanged="TxtFilter_TextChanged" Tag="Filter" ToolTip="按名称筛选"/>
             <Button Content="清除" Padding="8,4" Margin="4,0,0,0" Click="BtnClearFilter_Click"/>
         </StackPanel>
 

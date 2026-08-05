@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Net;
 
 namespace WinNetManager.Models;
 
@@ -113,38 +112,5 @@ public class RouteEntry : INotifyPropertyChanged
         return (RouteEntry)MemberwiseClone();
     }
 
-    public static string ToCidrPrefix(string destination, string netmask)
-    {
-        if (!IPAddress.TryParse(destination, out IPAddress? destIp) ||
-            !IPAddress.TryParse(netmask, out IPAddress? maskIp))
-            return destination;
-
-        byte[] ipBytes = destIp.GetAddressBytes();
-        byte[] maskBytes = maskIp.GetAddressBytes();
-        if (ipBytes.Length != 4 || maskBytes.Length != 4)
-            return destination;
-
-        int prefixLength = 0;
-        bool done = false;
-        foreach (byte b in maskBytes)
-        {
-            if (done) break;
-            for (int i = 7; i >= 0; i--)
-            {
-                if ((b & (1 << i)) != 0)
-                    prefixLength++;
-                else
-                {
-                    done = true;
-                    break;
-                }
-            }
-        }
-
-        byte[] networkBytes = new byte[4];
-        for (int i = 0; i < 4; i++)
-            networkBytes[i] = (byte)(ipBytes[i] & maskBytes[i]);
-
-        return $"{new IPAddress(networkBytes)}/{prefixLength}";
-    }
 }
+
