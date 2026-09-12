@@ -8,6 +8,10 @@ public class AppSettings
 {
     public string Theme { get; set; } = "Light";
 
+    // ---------- 自动化监控引擎 ----------
+    /// <summary>自动化引擎全局总开关（默认关闭，需手动开启）。</summary>
+    public bool AutomationGlobalEnabled { get; set; }
+
     private static string SettingsPath =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

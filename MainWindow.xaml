@@ -66,6 +66,9 @@
             <TabItem Header="网络诊断">
                 <views:NetworkDiagTab x:Name="DiagTab" />
             </TabItem>
+            <TabItem Header="自动化监控">
+                <views:AutomationTab x:Name="AutomationTab" />
+            </TabItem>
         </TabControl>
     </DockPanel>
 </Window>

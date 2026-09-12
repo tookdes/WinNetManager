@@ -25,6 +25,7 @@ Windows 上分散、难记、危险的网络命令，被包装成**可解释、�
 | **IP 配置** | 网卡 DHCP 释放+续租（IPv4/IPv6），网卡安全重启（防止远程断连），支持批量操作 | ipconfig / PowerShell |
 | **DNS** | 常规网卡 DNS 管理，高级 NRPT 规则配置，域名解析测试，DNS 缓存刷新 | PowerShell DnsClient |
 | **网络诊断** | 端口连通性测试，Tracert/Pathping，当前 TCP 连接查看 | PowerShell NetTCPIP |
+| **自动化监控** | IFTTT 式规则引擎：三态条件树（ping/网卡状态/网络配置文件）AND/OR 组合 + 时间门槛 → 动作链（Renew/重启/HTTP/通知/配置文件整理），内置 4 大场景模板，默认 dry-run，破坏性动作串行+熔断+预算 | WinNetManager.Core 引擎 |
 
 ## 交互亮点
 
@@ -108,3 +109,6 @@ dotnet publish -c Release --self-contained -r win-x64 -p:PublishSingleFile=true
 - **RegEdit 导航**: 自动检测本地化前缀（中文"计算机"/英文"Computer"），通过 LastKey 定位
 - **自然排序**: 通过 P/Invoke `shlwapi.dll!StrCmpLogicalW` 实现，列头排序也使用 `ListCollectionView.CustomSort`
 - **进程执行**: 统一使用 `ProcessRunner`，异步读取 stdout/stderr 避免死锁，超时自动 Kill
+- **自动化引擎**: 新增 `WinNetManager.Core` 纯逻辑类库承载规则引擎（三态条件、时间门槛、预算/冷却/重新武装、资源抑制、全局熔断、JSONL 审计），WPF 只做壳；探针共享去重（按 网卡×地址族×目标），ping 用 `ping -S` 绑定源地址，HTTP 动作支持 `--interface`/`socks5h://`
+- **自动化验证**: 「仅评估」只读取当前快照，不会执行动作；「测试动作」会在条件满足时按安全策略触发动作链，仍受全局开关、dry-run、冷却、预算与重新武装约束
+- **自动化记录**: 每次定时评估都会出现在当前运行日志；状态变化、触发及动作结果写入 JSONL 审计，重新启动后自动载入最近 200 条历史，并显示每条规则的上次评估时间

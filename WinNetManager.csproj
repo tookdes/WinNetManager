@@ -9,11 +9,15 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>netfol.ico</ApplicationIcon>
-    <DefaultItemExcludes>$(DefaultItemExcludes);ref\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);ref\**;WinNetManager.Core\**;WinNetManager.Tests\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
     <Resource Include="netfol.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="WinNetManager.Core\WinNetManager.Core.csproj" />
   </ItemGroup>
 
 </Project>

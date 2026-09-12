@@ -168,10 +168,20 @@ public partial class NetworkProfileTab : UserControl
 
         bool keepMulti = (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control
                       || (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) == System.Windows.Input.ModifierKeys.Shift;
-        if (!keepMulti)
+        if (grid.SelectionMode == System.Windows.Controls.DataGridSelectionMode.Extended)
         {
-            grid.SelectedItems.Clear();
-            grid.SelectedItems.Add(row.Item);
+            // 多选模式：允许维护 SelectedItems 集合
+            if (!keepMulti)
+            {
+                grid.SelectedItems.Clear();
+                grid.SelectedItems.Add(row.Item);
+            }
+        }
+        else
+        {
+            // 单选模式：不能改 SelectedItems 集合，只能用 SelectedItem
+            if (!keepMulti)
+                grid.SelectedItem = row.Item;
         }
         grid.CurrentItem = row.Item;
 
