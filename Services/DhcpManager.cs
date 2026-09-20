@@ -24,7 +24,7 @@ public class DhcpManager
                 .ToList();
             var ipv6Addrs = props.UnicastAddresses
                 .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && !a.Address.IsIPv6LinkLocal)
-                .Select(a => a.Address.ToString())
+                .Select(a => $"{a.Address} [{a.DuplicateAddressDetectionState}]")
                 .ToList();
 
             var gateways = props.GatewayAddresses

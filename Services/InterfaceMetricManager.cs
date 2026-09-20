@@ -19,7 +19,7 @@ public class InterfaceMetricManager
 
         string script =
             "Get-NetIPInterface | " +
-            "Select-Object InterfaceAlias, AddressFamily, InterfaceIndex, AutomaticMetric, InterfaceMetric | " +
+            "Select-Object InterfaceAlias, AddressFamily, InterfaceIndex, AutomaticMetric, InterfaceMetric, WeakHostSend, WeakHostReceive, IgnoreDefaultRoutes, RouterDiscovery | " +
             "ConvertTo-Csv -NoTypeInformation";
 
         string error;
@@ -37,6 +37,10 @@ public class InterfaceMetricManager
         int idxIndex = Array.IndexOf(headers, "InterfaceIndex");
         int idxAuto = Array.IndexOf(headers, "AutomaticMetric");
         int idxMetric = Array.IndexOf(headers, "InterfaceMetric");
+        int idxWeakSend = Array.IndexOf(headers, "WeakHostSend");
+        int idxWeakRecv = Array.IndexOf(headers, "WeakHostReceive");
+        int idxIgnore = Array.IndexOf(headers, "IgnoreDefaultRoutes");
+        int idxRouter = Array.IndexOf(headers, "RouterDiscovery");
 
         for (int i = 1; i < lines.Length; i++)
         {
@@ -53,13 +57,20 @@ public class InterfaceMetricManager
             string metricStr = idxMetric >= 0 && idxMetric < values.Length ? values[idxMetric] : "";
             int.TryParse(metricStr, out int metric);
 
+            string weakSend = idxWeakSend >= 0 && idxWeakSend < values.Length ? values[idxWeakSend] : "";
+            string weakRecv = idxWeakRecv >= 0 && idxWeakRecv < values.Length ? values[idxWeakRecv] : "";
+
             metrics.Add(new InterfaceMetricInfo
             {
                 InterfaceAlias = idxAlias >= 0 && idxAlias < values.Length ? values[idxAlias] : "",
                 AddressFamily = familyName,
                 InterfaceIndex = idxIndex >= 0 && idxIndex < values.Length ? values[idxIndex] : "",
                 AutomaticMetric = autoMetric,
-                InterfaceMetric = metric
+                InterfaceMetric = metric,
+                WeakHostSend = IsOn(weakSend),
+                WeakHostReceive = IsOn(weakRecv),
+                IgnoreDefaultRoutes = idxIgnore >= 0 && idxIgnore < values.Length && IsOn(values[idxIgnore]),
+                RouterDiscovery = idxRouter >= 0 && idxRouter < values.Length ? values[idxRouter] : ""
             });
         }
 
@@ -170,6 +181,72 @@ public class InterfaceMetricManager
         return $"Set-NetRoute -AddressFamily {family} -DestinationPrefix '{prefix}' -InterfaceAlias '{safeAlias}' -NextHop '{safeHop}' -RouteMetric {metric}";
     }
 
+    public MetricResult SetIgnoreDefaultRoutes(string interfaceAlias, string addressFamily, bool ignore)
+    {
+        string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
+        string flag = ignore ? "Enabled" : "Disabled";
+        string script =
+            $"Set-NetIPInterface " +
+            $"-InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(interfaceAlias)}' " +
+            $"-AddressFamily {family} " +
+            $"-IgnoreDefaultRoutes {flag}";
+        return ExecutePowerShell(script);
+    }
+
+    public static string GetSetIgnoreDefaultRoutesCommandPreview(string interfaceAlias, string addressFamily, bool ignore)
+    {
+        string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
+        string flag = ignore ? "Enabled" : "Disabled";
+        return $"Set-NetIPInterface -InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(interfaceAlias)}' -AddressFamily {family} -IgnoreDefaultRoutes {flag}";
+    }
+
+    public MetricResult SetRouterDiscovery(string interfaceAlias, string addressFamily, bool enabled)
+    {
+        string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
+        string flag = enabled ? "Enabled" : "Disabled";
+        string script =
+            $"Set-NetIPInterface " +
+            $"-InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(interfaceAlias)}' " +
+            $"-AddressFamily {family} " +
+            $"-RouterDiscovery {flag}";
+        return ExecutePowerShell(script);
+    }
+
+    public static string GetSetRouterDiscoveryCommandPreview(string interfaceAlias, string addressFamily, bool enabled)
+    {
+        string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
+        string flag = enabled ? "Enabled" : "Disabled";
+        return $"Set-NetIPInterface -InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(interfaceAlias)}' -AddressFamily {family} -RouterDiscovery {flag}";
+    }
+
+    public MetricResult PinIpv6Default(string interfaceAlias, string nextHop, int metric)
+    {
+        // Keep RouterDiscovery enabled so SLAAC can still learn/renew addresses from RA.
+        // IgnoreDefaultRoutes must be Disabled, otherwise even the static ::/0 is not used for ping -S.
+        var unignore = SetIgnoreDefaultRoutes(interfaceAlias, "IPv6", ignore: false);
+        if (!unignore.Success)
+            return unignore;
+        var add = new RoutingManager().AddRoute(new RouteEntry
+        {
+            AddressFamily = "IPv6",
+            DestinationPrefix = "::/0",
+            NextHop = nextHop,
+            InterfaceAlias = interfaceAlias,
+            RouteMetric = metric.ToString(),
+            Store = "PersistentStore",
+        });
+        if (!add.Success)
+            return new MetricResult { Success = false, Message = add.Message };
+        return new MetricResult { Success = true, Message = add.Message };
+    }
+
+    public static string GetPinIpv6DefaultCommandPreview(string interfaceAlias, string nextHop, int metric)
+    {
+        return GetSetIgnoreDefaultRoutesCommandPreview(interfaceAlias, "IPv6", ignore: false)
+            + "\n" + GetSetRouterDiscoveryCommandPreview(interfaceAlias, "IPv6", enabled: false)
+            + "\n" + $"netsh interface ipv6 add route prefix=::/0 interface='{ProcessRunner.EscapePsSingleQuoted(interfaceAlias)}' nexthop={ProcessRunner.EscapePsSingleQuoted(nextHop)} metric={metric} store=persistent";
+    }
+
     private static MetricResult ExecutePowerShell(string script)
     {
         string error;
@@ -189,6 +266,32 @@ public class InterfaceMetricManager
     }
 
     private static string[] ParseCsvLine(string line) => CsvParser.ParseLine(line);
+
+    public MetricResult SetWeakHost(string interfaceAlias, string addressFamily, bool enabled)
+    {
+        string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
+        string flag = enabled ? "Enabled" : "Disabled";
+        string script =
+            $"Set-NetIPInterface " +
+            $"-InterfaceAlias '{ProcessRunner.EscapePsSingleQuoted(interfaceAlias)}' " +
+            $"-AddressFamily {family} " +
+            $"-WeakHostSend {flag} " +
+            $"-WeakHostReceive {flag}";
+        return ExecutePowerShell(script);
+    }
+
+    public static string GetSetWeakHostCommandPreview(string interfaceAlias, string addressFamily, bool enabled)
+    {
+        string family = addressFamily == "IPv6" ? "IPv6" : "IPv4";
+        string flag = enabled ? "Enabled" : "Disabled";
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(interfaceAlias);
+        return $"Set-NetIPInterface -InterfaceAlias '{safeAlias}' -AddressFamily {family} -WeakHostSend {flag} -WeakHostReceive {flag}";
+    }
+
+    private static bool IsOn(string value)
+        => value == "1"
+            || value.Equals("True", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Enabled", StringComparison.OrdinalIgnoreCase);
 
     private static bool CI(string source, string value)
         => source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;

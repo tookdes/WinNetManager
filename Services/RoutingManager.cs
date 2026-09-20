@@ -331,13 +331,32 @@ public class RoutingManager
         string safeHop = ProcessRunner.EscapePsSingleQuoted(route.NextHop);
         string metric = route.RouteMetric ?? "1";
 
-        string cmd;
+        string addCmd;
+        string setCmd;
         if (route.AddressFamily == "IPv6")
-            cmd = $"netsh interface ipv6 add route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} metric={metric} store=persistent";
+        {
+            addCmd = $"netsh interface ipv6 add route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} metric={metric} store=persistent";
+            setCmd = $"netsh interface ipv6 set route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} metric={metric} store=persistent";
+        }
         else
-            cmd = $"netsh interface ipv4 add route {prefix} interface='{safeAlias}' nexthop={safeHop} metric={metric} store=persistent";
+        {
+            addCmd = $"netsh interface ipv4 add route {prefix} interface='{safeAlias}' nexthop={safeHop} metric={metric} store=persistent";
+            setCmd = $"netsh interface ipv4 set route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} metric={metric} store=persistent";
+        }
 
-        return ExecuteNetsh(cmd);
+        var add = ExecuteNetsh(addCmd);
+        if (add.Success)
+            return add;
+
+        if (ContainsIgnoreCase(add.Message, "already exists")
+            || ContainsIgnoreCase(add.Message, "已存在"))
+        {
+            var set = ExecuteNetsh(setCmd);
+            if (set.Success)
+                return new RouteCommandResult { Success = true, Message = "路由已在运行表中（常见于 IPv6 路由器通告），已改为更新度量并写入持久存储。" };
+        }
+
+        return add;
     }
 
     public RouteCommandResult DeleteRoute(RouteEntry route)

@@ -32,6 +32,9 @@
             <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="导出" Padding="10,4" Margin="6,0,0,0" Click="BtnExport_Click"/>
             <Button Content="导入" Padding="10,4" Margin="4,0,0,0" Click="BtnImport_Click"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
+            <Button Content="回源默认路由" Padding="12,4" Margin="6,0,0,0" Click="BtnSourceReturn_Click"
+                    ToolTip="只给选中网卡增加高跃点默认路由并设为强主机，不改其他网卡的默认网关"/>
         </StackPanel>
 
         <DockPanel Grid.Row="1" Margin="0,0,0,6">
@@ -130,6 +133,10 @@
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4">
                     <TextBox x:Name="TxtTestTarget" Width="200" Padding="4,2"
                              ToolTip="输入目标 IP 地址或域名"/>
+                    
+                    <TextBlock Text="源地址" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                    <TextBox x:Name="TxtTestSource" Width="140" Padding="4,2"
+                             ToolTip="可选。填网卡 B 的 IP（如 192.168.189.3）可验证回源第一跳"/>
                     <Button Content="测试路由" Padding="10,3" Margin="6,0,0,0" Click="BtnRouteTest_Click"/>
                 </StackPanel>
                 <TextBox x:Name="TxtTestResult" IsReadOnly="True"

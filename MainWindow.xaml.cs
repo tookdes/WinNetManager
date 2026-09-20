@@ -54,6 +54,7 @@ public partial class MainWindow : Window
         RefreshTab(DnsTab);
         RefreshTab(MetricTab);
         RefreshTab(RouteTab);
+        RefreshTab(FirewallTab);
     }
 
     private async void RefreshTab(UserControl tab)

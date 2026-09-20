@@ -102,6 +102,23 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
 
     private async void BtnRefresh_Click(object sender, RoutedEventArgs e) => await LoadRoutesAsync();
 
+    private async void BtnSourceReturn_Click(object sender, RoutedEventArgs e)
+    {
+        if (HasPendingChanges)
+        {
+            var r = MessageBox.Show(
+                "持久路由还有未应用的更改。回源向导会直接写入系统。\n\n确定继续吗？建议先取消或应用那些更改。",
+                "未应用的更改",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (r != MessageBoxResult.Yes) return;
+        }
+
+        var dlg = new SourceReturnWindow { Owner = Window.GetWindow(this) };
+        if (dlg.ShowDialog() == true && dlg.Applied)
+            await LoadRoutesAsync();
+    }
+
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e) => RoutesGrid.SelectAll();
 
     private void BtnInvertSelection_Click(object sender, RoutedEventArgs e) =>
@@ -639,9 +656,15 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
     private async void BtnRouteTest_Click(object sender, RoutedEventArgs e)
     {
         string target = TxtTestTarget.Text?.Trim() ?? "";
+        string source = TxtTestSource.Text?.Trim() ?? "";
         if (string.IsNullOrEmpty(target))
         {
             CopyableMessageBox.Show("请输入目标 IP 地址或域名。", "提示", MessageBoxImage.Information);
+            return;
+        }
+        if (!string.IsNullOrEmpty(source) && !System.Net.IPAddress.TryParse(source, out _))
+        {
+            CopyableMessageBox.Show("源地址必须是有效 IP。", "提示", MessageBoxImage.Warning);
             return;
         }
 
@@ -673,8 +696,9 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
                 }
 
                 // 2. 查找匹配路由
+                string localArg = string.IsNullOrEmpty(source) ? "" : $" -LocalIPAddress '{ProcessRunner.EscapePsSingleQuoted(source)}'";
                 string routeScript =
-                    $"Find-NetRoute -RemoteIPAddress '{ProcessRunner.EscapePsSingleQuoted(ip)}' | " +
+                    $"Find-NetRoute -RemoteIPAddress '{ProcessRunner.EscapePsSingleQuoted(ip)}'{localArg} | " +
                     "Select-Object InterfaceAlias, InterfaceIndex, NextHop, RouteMetric | " +
                     "ConvertTo-Csv -NoTypeInformation";
                 string routeError;
@@ -683,6 +707,11 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
                 if (!string.IsNullOrEmpty(routeError) && routeError.IndexOf("警告", StringComparison.OrdinalIgnoreCase) < 0 && routeError.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) < 0)
                 {
                     sb.AppendLine($"路由查询失败：{routeError.Trim()}");
+                    if (routeError.IndexOf("1231", StringComparison.Ordinal) >= 0
+                        || routeError.IndexOf("network location cannot be reached", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        sb.AppendLine("这不是目标地址写错。Windows 错误 1231 表示：从该源地址所在网卡出发，没有到达目标的可用路由（IPv6 常见于该卡没有生效 ::/0，或下一跳邻居不可达）。ipconfig 里有默认网关不代表可以发包。");
+                    }
                 }
                 else
                 {
@@ -717,9 +746,23 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
                 sb.AppendLine();
 
                 // 3. Ping 测试
-                string pingScript = $"Test-Connection -ComputerName '{ProcessRunner.EscapePsSingleQuoted(ip)}' -Count 4 -ErrorAction SilentlyContinue | Select-Object ResponseTime | ConvertTo-Csv -NoTypeInformation";
+                if (!string.IsNullOrEmpty(source))
+                    AppendSourcePathDiagnostics(sb, source);
+
+                string pingOutput;
                 string pingError;
-                string pingOutput = RunPowerShell(pingScript, out pingError, 20000);
+                if (!string.IsNullOrEmpty(source))
+                {
+                    pingOutput = ProcessRunner.Run("ping.exe", new[] { "-n", "4", "-S", source, ip }, out pingError, 20000);
+                    if (!string.IsNullOrWhiteSpace(pingError))
+                        sb.AppendLine(pingError.Trim());
+                    if (!string.IsNullOrWhiteSpace(pingOutput))
+                        sb.AppendLine(pingOutput.Trim());
+                    return sb.ToString().Trim();
+                }
+
+                string pingScript = $"Test-Connection -ComputerName '{ProcessRunner.EscapePsSingleQuoted(ip)}' -Count 4 -ErrorAction SilentlyContinue | Select-Object ResponseTime | ConvertTo-Csv -NoTypeInformation";
+                pingOutput = RunPowerShell(pingScript, out pingError, 20000);
 
                 if (!string.IsNullOrEmpty(pingError) && pingError.IndexOf("警告", StringComparison.OrdinalIgnoreCase) < 0 && pingError.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) < 0)
                 {
@@ -793,6 +836,79 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
             && a.DestinationPrefix == b.DestinationPrefix
             && a.NextHop == b.NextHop
             && a.InterfaceAlias == b.InterfaceAlias;
+    }
+
+
+    private static void AppendSourcePathDiagnostics(StringBuilder sb, string source)
+    {
+        sb.AppendLine("源地址诊断：");
+        string safeSrc = ProcessRunner.EscapePsSingleQuoted(source);
+        string script =
+            "$src='" + safeSrc + "'; " +
+            "$a=Get-NetIPAddress -IPAddress $src -ErrorAction SilentlyContinue | Select-Object -First 1; " +
+            "if(-not $a){'NOADDR';return}; " +
+            "$family=if($a.AddressFamily -eq 23 -or [string]$a.AddressFamily -eq 'IPv6'){'IPv6'}else{'IPv4'}; " +
+            "$def=if($family -eq 'IPv6'){'::/0'}else{'0.0.0.0/0'}; " +
+            "'ADDR|'+$a.InterfaceAlias+'|'+$a.InterfaceIndex+'|'+$a.AddressState+'|'+$a.PrefixLength+'|'+$family; " +
+            "$routes=@(Get-NetRoute -InterfaceAlias $a.InterfaceAlias -DestinationPrefix $def -ErrorAction SilentlyContinue); " +
+            "if($routes.Count -eq 0){'NOROUTE|'+$def}else{foreach($r in $routes){'ROUTE|'+$r.DestinationPrefix+'|'+$r.NextHop+'|'+$r.RouteMetric+'|'+$r.InterfaceAlias}}; " +
+            "$hop=($routes | Select-Object -First 1).NextHop; " +
+            "if($hop -and $hop -ne '::' -and $hop -ne '0.0.0.0'){ $n=Get-NetNeighbor -InterfaceAlias $a.InterfaceAlias -IPAddress $hop -ErrorAction SilentlyContinue | Select-Object -First 1; if($n){'NEI|'+$n.IPAddress+'|'+$n.LinkLayerAddress+'|'+$n.State}else{'NEI|'+$hop+'||missing'} }";
+
+        string error;
+        string output = RunPowerShell(script, out error, 15000);
+        if (!string.IsNullOrWhiteSpace(error)
+            && error.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) < 0
+            && error.IndexOf("警告", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            sb.AppendLine("源路径诊断失败：" + error.Trim());
+        }
+
+        bool sawRoute = false;
+        string? ifIndex = null;
+        string? hop = null;
+        foreach (var raw in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string line = raw.Trim();
+            if (line == "NOADDR")
+            {
+                sb.AppendLine("本机没有这个源地址：" + source);
+                return;
+            }
+            var parts = line.Split('|');
+            if (parts[0] == "ADDR" && parts.Length >= 6)
+            {
+                ifIndex = parts[2];
+                sb.AppendLine($"源地址 {source}  网卡 {parts[1]} (#{parts[2]})  状态 {parts[3]}  /{parts[4]}  {parts[5]}");
+                if (parts[3].IndexOf("Deprecated", StringComparison.OrdinalIgnoreCase) >= 0)
+                    sb.AppendLine("该地址已 Deprecated（隐私地址过期），Windows 可能拒绝用它发包。请换同网卡上 Preferred 的 IPv6。");
+            }
+            else if (parts[0] == "NOROUTE" && parts.Length >= 2)
+            {
+                sb.AppendLine("该网卡运行表里没有 {parts[1]}。ipconfig 的默认网关可能没有被安装成可用路由。");
+            }
+            else if (parts[0] == "ROUTE" && parts.Length >= 5)
+            {
+                sawRoute = true;
+                hop = parts[2];
+                sb.AppendLine($"默认路由 {parts[1]} via {parts[2]}  metric {parts[3]}  ({parts[4]})");
+            }
+            else if (parts[0] == "NEI" && parts.Length >= 4)
+            {
+                sb.AppendLine($"下一跳邻居 {parts[1]}  MAC={parts[2]}  状态 {parts[3]}");
+                if (parts[3].IndexOf("Unreachable", StringComparison.OrdinalIgnoreCase) >= 0
+                    || parts[3].IndexOf("Incomplete", StringComparison.OrdinalIgnoreCase) >= 0
+                    || parts[3] == "missing")
+                    sb.AppendLine("下一跳不可达。改跃点没用；需要先 ping 通网关。链路本地网关必须带 %接口索引。");
+            }
+        }
+
+        if (!sawRoute)
+            sb.AppendLine("结论：这张卡没有可用默认路由，所以会 Find-NetRoute 1231 / ping 一般故障。");
+        if (!string.IsNullOrEmpty(hop) && hop.StartsWith("fe80:", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(ifIndex))
+            sb.AppendLine("请先测网关：ping " + hop + "%" + ifIndex + " （%后是接口索引，必须带）。若不通，可把下一跳改成路由器全局 IPv6。");
+
+        sb.AppendLine();
     }
 
     private void SetStatus(string msg)

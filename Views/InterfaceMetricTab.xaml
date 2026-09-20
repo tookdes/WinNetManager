@@ -10,6 +10,8 @@
             <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="修改跃点" Padding="12,4" Margin="6,0,0,0" Click="BtnEdit_Click" ToolTip="为选中的网卡设置指定跃点数 (F2)"/>
             <Button Content="设为自动跃点" Padding="12,4" Margin="6,0,0,0" Click="BtnAuto_Click" ToolTip="为选中的网卡启用自动跃点"/>
+            <Button Content="设为强主机" Padding="12,4" Margin="6,0,0,0" Click="BtnStrongHost_Click"
+                    ToolTip="关闭选中网卡的 Weak Host Send / Receive，源地址属于该卡的包必须从该卡发出"/>
             <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <ComboBox x:Name="CmbAddressFamily" Width="52" Padding="2,2" Margin="4,0,0,0"
                       VerticalContentAlignment="Center" SelectionChanged="CmbAddressFamily_SelectionChanged">
@@ -73,11 +75,37 @@
                             <TextBlock Text="跃点数" ToolTip="数值越小，路由优先级越高"/>
                         </DataGridTextColumn.Header>
                     </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding HostModelDisplay}" Width="90">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="主机模型" ToolTip="强主机：源地址必须属于发送接口；弱主机允许源地址从其他网卡发出"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding WeakHostSendDisplay}" Width="90">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="弱主机发送" ToolTip="WeakHostSend＝是表示允许源 IP 不属于本卡的包从本卡发出"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding WeakHostReceiveDisplay}" Width="90">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="弱主机接收" ToolTip="WeakHostReceive＝是表示允许目的 IP 不属于本卡的包从本卡接收"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding IgnoreDefaultRoutesDisplay}" Width="90">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="忽略默认路由" ToolTip="IgnoreDefaultRoutes: RA ::/0 ignored"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding RouterDiscovery}" Width="90">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="路由器发现" ToolTip="RouterDiscovery. Disabled = no RA default overwrite."/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
                 </DataGrid.Columns>
                 <DataGrid.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="修改跃点" Click="BtnEdit_Click"/>
                         <MenuItem Header="设为自动跃点" Click="BtnAuto_Click"/>
+                        <MenuItem Header="设为强主机" Click="BtnStrongHost_Click"/>
                         <Separator/>
                         <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
                     </ContextMenu>
@@ -87,9 +115,16 @@
             <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"/>
 
             <DockPanel Grid.Row="2" Margin="0,4,0,0">
-                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                    <TextBlock DockPanel.Dock="Left" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Text="默认网关跃点 (0.0.0.0 / ::/0)"/>
-                    <TextBlock x:Name="TbkGatewayCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" HorizontalAlignment="Right"/>
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6" LastChildFill="False">
+                    <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center"
+                               FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"
+                               Text="默认网关跃点 (0.0.0.0 / ::/0)"/>
+                    <TextBlock x:Name="TbkGatewayCount" DockPanel.Dock="Right" VerticalAlignment="Center"
+                               FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"
+                               Margin="4,0,0,0"/>
+                    <Button DockPanel.Dock="Right" Content="固定 IPv6 默认路由" Padding="10,2"
+                            Margin="20,0,16,0" FontSize="11" VerticalAlignment="Center"
+                            Click="BtnPinIpv6_Click" ToolTip="先在下表选中一张网卡的 IPv6 网关。作用：让从这张卡进来的 IPv6 连接从同一张卡回去，并减少被路由器通告改掉跃点。不改 IPv4，也不改未选中的网卡。"/>
                 </DockPanel>
                 <DataGrid x:Name="GatewayGrid"
                           AutoGenerateColumns="False"
@@ -110,6 +145,7 @@
                     <DataGrid.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="修改网关跃点" Click="BtnEditGateway_Click"/>
+                            <MenuItem Header="固定 IPv6 默认路由" Click="BtnPinIpv6_Click" ToolTip="先在下表选中一张网卡的 IPv6 网关。作用：让从这张卡进来的 IPv6 连接从同一张卡回去，并减少被路由器通告改掉跃点。不改 IPv4，也不改未选中的网卡。"/>
                             <Separator/>
                             <MenuItem Header="复制选中值" Click="MenuCopyGateway_Click"/>
                         </ContextMenu>

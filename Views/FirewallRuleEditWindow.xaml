@@ -1,0 +1,82 @@
+<Window x:Class="WinNetManager.Views.FirewallRuleEditWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="编辑防火墙规则" Height="420" Width="500"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Icon="../netfol.ico"
+        Background="{DynamicResource WindowBgBrush}">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Label Grid.Row="0" Grid.Column="0" Content="显示名称：" VerticalAlignment="Center"/>
+        <TextBox Grid.Row="0" Grid.Column="1" x:Name="TxtDisplayName" Margin="5"/>
+
+        <Label Grid.Row="1" Grid.Column="0" Content="方向：" VerticalAlignment="Center"/>
+        <ComboBox Grid.Row="1" Grid.Column="1" x:Name="CmbDirection" Margin="5">
+            <ComboBoxItem Content="Inbound" Tag="Inbound" IsSelected="True"/>
+            <ComboBoxItem Content="Outbound" Tag="Outbound"/>
+        </ComboBox>
+
+        <Label Grid.Row="2" Grid.Column="0" Content="动作：" VerticalAlignment="Center"/>
+        <ComboBox Grid.Row="2" Grid.Column="1" x:Name="CmbAction" Margin="5">
+            <ComboBoxItem Content="Allow" Tag="Allow" IsSelected="True"/>
+            <ComboBoxItem Content="Block" Tag="Block"/>
+        </ComboBox>
+
+        <Label Grid.Row="3" Grid.Column="0" Content="协议：" VerticalAlignment="Center"/>
+        <ComboBox Grid.Row="3" Grid.Column="1" x:Name="CmbProtocol" Margin="5">
+            <ComboBoxItem Content="TCP" Tag="TCP" IsSelected="True"/>
+            <ComboBoxItem Content="UDP" Tag="UDP"/>
+            <ComboBoxItem Content="Any" Tag="Any"/>
+        </ComboBox>
+
+        <Label Grid.Row="4" Grid.Column="0" Content="本地端口：" VerticalAlignment="Center"/>
+        <TextBox Grid.Row="4" Grid.Column="1" x:Name="TxtLocalPort" Margin="5"
+                 ToolTip="例如 5555,8443,44301-44399。Any 表示全部端口。"/>
+
+        <Label Grid.Row="5" Grid.Column="0" Content="配置文件：" VerticalAlignment="Center"/>
+        <ComboBox Grid.Row="5" Grid.Column="1" x:Name="CmbProfile" Margin="5">
+            <ComboBoxItem Content="Any" Tag="Any" IsSelected="True"/>
+            <ComboBoxItem Content="Domain,Private,Public" Tag="Domain,Private,Public"/>
+            <ComboBoxItem Content="Domain" Tag="Domain"/>
+            <ComboBoxItem Content="Private" Tag="Private"/>
+            <ComboBoxItem Content="Public" Tag="Public"/>
+        </ComboBox>
+
+        <Label Grid.Row="6" Grid.Column="0" Content="绑定网卡：" VerticalAlignment="Center"/>
+        <ComboBox Grid.Row="6" Grid.Column="1" x:Name="CmbInterface" Margin="5" IsEditable="True"
+                  ToolTip="留空表示不按网卡限制。建议选入站网卡。"/>
+
+        <Label Grid.Row="7" Grid.Column="0" Content="本地地址：" VerticalAlignment="Center"/>
+        <TextBox Grid.Row="7" Grid.Column="1" x:Name="TxtLocalAddress" Margin="5"
+                 ToolTip="可选。填网卡自身 IP（如 192.168.189.3），不是对端子网。留空允许任意源地址。"/>
+
+        <TextBlock Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
+                   Text="入站允许规则默认对全部配置文件生效，不限本地子网。尽量绑定入站网卡，而不要把 RemoteAddress 设成局域网。" TextWrapping="Wrap" Margin="5,8,5,0"
+                   Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11"
+                   VerticalAlignment="Top"/>
+
+        <StackPanel Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="2"
+                    Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="保存" Width="80" Margin="5" IsDefault="True" Click="BtnSave_Click"/>
+            <Button Content="取消" Width="80" Margin="5" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

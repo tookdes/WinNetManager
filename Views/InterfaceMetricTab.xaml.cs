@@ -210,6 +210,100 @@ public partial class InterfaceMetricTab : UserControl, IRefreshableTab
         SetStatus($"已设为自动跃点，{selected.Count - errors.Count}/{selected.Count} 成功");
     }
 
+    private async void BtnStrongHost_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = GetSelected();
+        if (selected.Count == 0)
+        {
+            CopyableMessageBox.Show("请先选择至少一个网卡。", "未选择", MessageBoxImage.Information);
+            return;
+        }
+
+        var names = string.Join("\n", selected.Select(s => $"  • {s.InterfaceAlias} ({s.AddressFamily})"));
+        var result = MessageBox.Show(
+            "确定要为以下 " + selected.Count + " 个网卡关闭 Weak Host Send / Receive（强主机）？\n\n" + names + "\n\n只影响选中项，不会改其他网卡。",
+            "确认设为强主机",
+            MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+        if (result != MessageBoxResult.Yes) return;
+
+        var results = await Task.Run(() =>
+        {
+            var list = new List<(InterfaceMetricInfo item, MetricResult result)>();
+            foreach (var item in selected)
+                list.Add((item, _manager.SetWeakHost(item.InterfaceAlias, item.AddressFamily, enabled: false)));
+            return list;
+        });
+
+        var errors = results.Where(r => !r.result.Success)
+            .Select(r => $"{r.item.InterfaceAlias} ({r.item.AddressFamily}): {r.result.Message}").ToList();
+        var previews = results.Where(r => r.result.Success)
+            .Select(r => InterfaceMetricManager.GetSetWeakHostCommandPreview(r.item.InterfaceAlias, r.item.AddressFamily, enabled: false)).ToList();
+
+        if (previews.Count > 0)
+        {
+            if (Window.GetWindow(this) is MainWindow mw)
+                mw.SetCommandPreview(string.Join("\n", previews));
+        }
+
+        if (errors.Count > 0)
+        {
+            CopyableMessageBox.Show(
+                "成功 " + (selected.Count - errors.Count) + "/" + selected.Count + "\n\n失败项：\n" + string.Join("\n", errors),
+                "操作结果", MessageBoxImage.Warning);
+        }
+
+        await LoadDataAsync();
+        SetStatus("已设为强主机，" + (selected.Count - errors.Count) + "/" + selected.Count + " 成功");
+    }
+
+    private async void BtnPinIpv6_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = GetSelectedGateways().Where(g => g.AddressFamily == "IPv6").ToList();
+        if (selected.Count == 0)
+        {
+            CopyableMessageBox.Show("请在下半表选中要固定的 IPv6 默认网关（例如 2.5G）。", "未选择", MessageBoxImage.Information);
+            return;
+        }
+
+        var names = string.Join("\n", selected.Select(s => $"  - {s.InterfaceAlias} via {s.NextHop} (metric {s.RouteMetric})"));
+        string? input = NetworkProfileTab.PromptInput(
+            "固定 IPv6 默认路由",
+            "将忽略该网卡路由器通告下发的 ::/0（防止跃点被改回 256），并把下面 " + selected.Count + " 条网关写入持久路由。\n不会改 IPv4，也不会改未选中的网卡。\n\n" + names + "\n\n请输入持久路由跃点（建议 501，要高于 10G 那条）：",
+            "501",
+            Window.GetWindow(this));
+        if (input == null) return;
+        if (!int.TryParse(input, out int metric) || metric < 0)
+        {
+            CopyableMessageBox.Show("请输入有效的非负整数跃点数。", "输入无效", MessageBoxImage.Warning);
+            return;
+        }
+
+        var results = await Task.Run(() =>
+        {
+            var list = new List<(GatewayMetricInfo item, MetricResult result)>();
+            foreach (var item in selected)
+                list.Add((item, _manager.PinIpv6Default(item.InterfaceAlias, item.NextHop, metric)));
+            return list;
+        });
+
+        var errors = results.Where(r => !r.result.Success)
+            .Select(r => $"{r.item.InterfaceAlias}: {r.result.Message}").ToList();
+        var previews = results.Where(r => r.result.Success)
+            .Select(r => InterfaceMetricManager.GetPinIpv6DefaultCommandPreview(r.item.InterfaceAlias, r.item.NextHop, metric)).ToList();
+        if (previews.Count > 0 && Window.GetWindow(this) is MainWindow mw)
+            mw.SetCommandPreview(string.Join("\n", previews));
+        if (errors.Count > 0)
+        {
+            CopyableMessageBox.Show(
+                "成功 " + (selected.Count - errors.Count) + "/" + selected.Count + "\n\n" + string.Join("\n", errors),
+                "操作结果", MessageBoxImage.Warning);
+        }
+
+        await LoadDataAsync();
+        SetStatus("已固定 IPv6 默认路由 " + (selected.Count - errors.Count) + "/" + selected.Count);
+    }
+
     private async void BtnEditGateway_Click(object sender, RoutedEventArgs e)
     {
         var selected = GetSelectedGateways();

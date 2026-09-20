@@ -57,6 +57,9 @@
             <TabItem Header="端口转发">
                 <views:PortProxyTab x:Name="ProxyTab" />
             </TabItem>
+            <TabItem Header="防火墙">
+                <views:FirewallTab x:Name="FirewallTab" />
+            </TabItem>
             <TabItem Header="IP 配置">
                 <views:DhcpTab x:Name="DhcpTab" />
             </TabItem>

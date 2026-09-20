@@ -5,6 +5,7 @@ using System.Net;
 using System.Windows;
 using System.Windows.Controls;
 using WinNetManager.Models;
+using WinNetManager.Core.Net;
 using WinNetManager.Services;
 
 namespace WinNetManager.Views;
@@ -124,15 +125,10 @@ public partial class RouteEditWindow : Window
 
         // 智能补全目标前缀掩码
         bool wasBareIp = !string.IsNullOrEmpty(prefix) && !prefix.Contains('/');
+        string? comboLen = (CmbPrefixLength.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+        prefix = CidrPrefix.Resolve(prefix, comboLen, family);
         if (wasBareIp)
-        {
-            string? completed = AutoCompletePrefix(prefix, family);
-            if (completed != null)
-            {
-                prefix = completed;
-                TxtDestinationPrefix.Text = prefix;
-            }
-        }
+            TxtDestinationPrefix.Text = prefix;
 
         if (string.IsNullOrEmpty(prefix))
         {

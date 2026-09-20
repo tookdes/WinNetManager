@@ -1,0 +1,74 @@
+<Window x:Class="WinNetManager.Views.SourceReturnWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="回源默认路由" Height="520" Width="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Icon="../netfol.ico"
+        Background="{DynamicResource WindowBgBrush}">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+                   TextWrapping="Wrap" Margin="0,0,0,10" FontSize="12"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   Text="只给选中网卡增加高跃点默认路由（IPv4 0.0.0.0/0、IPv6 ::/0），用于入站回包从同一张卡出去。不会删除、替换其他网卡的默认网关，也不会把整机唯一出口改到这张卡。"/>
+
+        <Label Grid.Row="1" Grid.Column="0" Content="目标网卡：" VerticalAlignment="Center"/>
+        <ComboBox Grid.Row="1" Grid.Column="1" x:Name="CmbInterface" Margin="5"
+                  SelectionChanged="CmbInterface_SelectionChanged"/>
+
+        <Label Grid.Row="2" Grid.Column="0" Content="IPv4 下一跳：" VerticalAlignment="Center"/>
+        <TextBox Grid.Row="2" Grid.Column="1" x:Name="TxtIpv4Hop" Margin="5"
+                 ToolTip="例如 192.168.189.1。留空表示不添加 IPv4 默认路由。"/>
+
+        <Label Grid.Row="3" Grid.Column="0" Content="IPv6 下一跳：" VerticalAlignment="Center"/>
+        <TextBox Grid.Row="3" Grid.Column="1" x:Name="TxtIpv6Hop" Margin="5"
+                 ToolTip="例如 fe80::265a:5fff:feef:2d05。留空表示不添加 IPv6 默认路由。"/>
+
+        <Label Grid.Row="4" Grid.Column="0" Content="路由跃点：" VerticalAlignment="Center"/>
+        <TextBox Grid.Row="4" Grid.Column="1" x:Name="TxtMetric" Margin="5" Text="500"
+                 ToolTip="必须高于主出口网卡的默认路由跃点，建议 500。"/>
+
+        <CheckBox Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" x:Name="ChkStrongHost"
+                  Margin="5,8,5,4" IsChecked="True" Content="同时关闭该网卡的 Weak Host Send / Receive（保持强主机）"/>
+
+        <CheckBox Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" x:Name="ChkFirewall"
+                  Margin="5,4" Content="路由仍不通时再加：入站允许 TCP 端口（绑定该网卡，配置文件=全部）"
+                  Checked="ChkFirewall_Changed" Unchecked="ChkFirewall_Changed"/>
+
+        <DockPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Margin="5,4">
+            <Label DockPanel.Dock="Left" Content="TCP 端口：" VerticalAlignment="Center"/>
+            <TextBox x:Name="TxtFirewallPorts" IsEnabled="False"
+                     ToolTip="例如 5555,8443,9443,11443,44301-44399,21114-21119"/>
+        </DockPanel>
+
+        <TextBox Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" x:Name="TxtPreview"
+                 Margin="5,8,5,4" IsReadOnly="True" FontFamily="Consolas" FontSize="11"
+                 TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                 Background="{DynamicResource ResultBoxBgBrush}"/>
+
+        <StackPanel Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="2"
+                    Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="预览命令" Width="90" Margin="5" Click="BtnPreview_Click"/>
+            <Button x:Name="BtnApply" Content="写入系统" Width="90" Margin="5" IsDefault="True" Click="BtnApply_Click"/>
+            <Button Content="取消" Width="80" Margin="5" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
