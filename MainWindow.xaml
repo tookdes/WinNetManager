@@ -66,6 +66,9 @@
             <TabItem Header="DNS">
                 <views:DnsTab x:Name="DnsTab" />
             </TabItem>
+            <TabItem Header="协议开关">
+                <views:AdapterToggleTab x:Name="ToggleTab" />
+            </TabItem>
             <TabItem Header="网络诊断">
                 <views:NetworkDiagTab x:Name="DiagTab" />
             </TabItem>
