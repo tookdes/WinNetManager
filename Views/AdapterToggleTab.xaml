@@ -1,0 +1,107 @@
+<UserControl x:Class="WinNetManager.Views.AdapterToggleTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel Margin="8">
+        <!-- Toolbar -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+            <Button Content="刷新" Padding="12,4" Click="BtnRefresh_Click"/>
+            <Button Content="全选" Padding="8,4" Margin="6,0,0,0" Click="BtnSelectAll_Click"/>
+            <Button Content="反选" Padding="8,4" Margin="4,0,0,0" Click="BtnInvertSelection_Click"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
+            <Button Content="启用 IPv6" Padding="12,4" Margin="6,0,0,0" Click="BtnEnableIPv6_Click"
+                    ToolTip="为选中网卡启用 IPv6 协议绑定"/>
+            <Button Content="禁用 IPv6" Padding="12,4" Margin="6,0,0,0" Click="BtnDisableIPv6_Click"
+                    ToolTip="为选中网卡禁用 IPv6 协议绑定（彻底关闭该网卡的 IPv6）"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
+            <Button Content="开隐私地址" Padding="12,4" Margin="6,0,0,0" Click="BtnEnablePrivacy_Click"
+                    ToolTip="启用 IPv6 隐私扩展（RandomizeIdentifiers），使用随机临时地址替代基于 MAC 的 EUI-64 地址，减少地址数量波动"/>
+            <Button Content="关隐私地址" Padding="12,4" Margin="6,0,0,0" Click="BtnDisablePrivacy_Click"
+                    ToolTip="禁用 IPv6 隐私扩展，使用固定的 EUI-64 地址"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
+            <Button Content="NetBIOS 关" Padding="10,4" Margin="6,0,0,0" Click="BtnNetBiosDisable_Click"
+                    ToolTip="禁用 NetBIOS over TCP/IP，减少广播流量和攻击面"/>
+            <Button Content="NetBIOS 开" Padding="10,4" Margin="4,0,0,0" Click="BtnNetBiosEnable_Click"
+                    ToolTip="启用 NetBIOS over TCP/IP"/>
+            <Button Content="NetBIOS 默认" Padding="10,4" Margin="4,0,0,0" Click="BtnNetBiosDefault_Click"
+                    ToolTip="NetBIOS 恢复为跟随 DHCP 设置"/>
+        </StackPanel>
+
+        <!-- Global IPv6 privacy toggle bar -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                <TextBlock VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           Text="全局 IPv6 隐私地址："/>
+                <TextBlock x:Name="TxtGlobalPrivacy" VerticalAlignment="Center" FontSize="11"
+                           FontWeight="SemiBold" Margin="4,0,0,0"/>
+                <Button Content="全局开" Padding="8,2" FontSize="11" Margin="8,0,0,0"
+                        Click="BtnGlobalPrivacyOn_Click"
+                        ToolTip="全局启用 IPv6 RandomizeIdentifiers + UseTemporaryAddresses"/>
+                <Button Content="全局关" Padding="8,2" FontSize="11" Margin="4,0,0,0"
+                        Click="BtnGlobalPrivacyOff_Click"
+                        ToolTip="全局禁用 IPv6 RandomizeIdentifiers + UseTemporaryAddresses"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Description -->
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" FontSize="11"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   TextWrapping="Wrap"
+                   Text="管理网卡协议开关：IPv6 启用/禁用、IPv6 隐私地址（减少临时地址膨胀）、NetBIOS over TCP/IP。修改后可能需要重启网卡或释放续租才能生效。"/>
+
+        <!-- DataGrid + Empty state -->
+        <Grid>
+            <DataGrid x:Name="ToggleGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                      IsReadOnly="True" SelectionMode="Extended" GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column" ColumnWidth="Auto" Sorting="Grid_Sorting">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="启用 IPv6" Click="BtnEnableIPv6_Click"/>
+                        <MenuItem Header="禁用 IPv6" Click="BtnDisableIPv6_Click"/>
+                        <Separator/>
+                        <MenuItem Header="开隐私地址" Click="BtnEnablePrivacy_Click"/>
+                        <MenuItem Header="关隐私地址" Click="BtnDisablePrivacy_Click"/>
+                        <Separator/>
+                        <MenuItem Header="NetBIOS 禁用" Click="BtnNetBiosDisable_Click"/>
+                        <MenuItem Header="NetBIOS 启用" Click="BtnNetBiosEnable_Click"/>
+                        <MenuItem Header="NetBIOS 默认" Click="BtnNetBiosDefault_Click"/>
+                        <Separator/>
+                        <MenuItem Header="复制选中值" Click="MenuCopy_Click"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Binding="{Binding Name}" Header="网卡名称" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding Description}" Header="描述" Width="*"/>
+                    <DataGridTextColumn Binding="{Binding Status}" Header="状态" Width="Auto"/>
+                    <DataGridTextColumn Binding="{Binding IPv6Display}" Width="Auto">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="IPv6" ToolTip="IPv6 协议绑定是否启用"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding IPv6PrivacyDisplay}" Width="Auto">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="隐私地址" ToolTip="IPv6 RandomizeIdentifiers — 启用后使用随机临时地址，禁用后使用固定 EUI-64 地址"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding NetBiosDisplay}" Width="Auto">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="NetBIOS" ToolTip="NetBIOS over TCP/IP：默认(DHCP)、已启用、已禁用"/>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+            <Border x:Name="EmptyState" Background="{DynamicResource EmptyStateBgBrush}" Visibility="Collapsed">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,50">
+                    <TextBlock Text="&#x1F527;" FontSize="48" HorizontalAlignment="Center"
+                               Foreground="{DynamicResource EmptyIconBrush}" FontFamily="Segoe UI Emoji"/>
+                    <TextBlock Text="未检测到网卡" FontSize="16" Foreground="{DynamicResource EmptyTitleBrush}"
+                               HorizontalAlignment="Center" Margin="0,12,0,4" FontWeight="SemiBold"/>
+                    <TextBlock Text="无法获取网络适配器信息。请确保以管理员身份运行本工具。" FontSize="12"
+                               Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap"
+                               TextAlignment="Center" MaxWidth="420"/>
+                    <Button Content="刷新" Padding="16,4" Margin="0,16,0,0" HorizontalAlignment="Center" Click="BtnRefresh_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>
