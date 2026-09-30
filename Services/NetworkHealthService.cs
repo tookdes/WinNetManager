@@ -3,6 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Text;
+using System.Xml.Linq;
 using Microsoft.Win32;
 
 namespace WinNetManager.Services;
@@ -37,6 +42,7 @@ public static class NetworkHealthService
         try { CollectDrivers(items); } catch { }
         try { CollectTun(items); } catch { }
         try { CollectWfpAndHook(items); } catch { }
+        try { CollectKnownInterceptors(items, dnsFailureContext: false); } catch { }
         try { CollectProxy(items); } catch { }
         try { CollectVpn(items); } catch { }
         try { CollectFirewall(items); } catch { }
@@ -56,6 +62,31 @@ public static class NetworkHealthService
         });
 
         return items;
+    }
+
+    /// <summary>
+    /// DNS 解析失败后的轻量诊断。只检查与名称解析直接相关的项目，
+    /// 避免自动触发完整网络健康扫描带来的额外等待。
+    /// </summary>
+    public static List<NetworkHealthItem> GetDnsFailureSnapshot(string domain)
+    {
+        var items = new List<NetworkHealthItem>();
+
+        InitServiceCache();
+        InitDriverCache();
+
+        try { CollectKnownInterceptors(items, dnsFailureContext: true); } catch { }
+        try { CollectProxy(items); } catch { }
+        try { CollectDns(items); } catch { }
+        try { CollectHosts(items); } catch { }
+        try { CheckService(items, "Dnscache", "DNS Client", "DNS 解析缓存服务。", warnWhenStopped: true); } catch { }
+        try { CollectDnsTransport(items, domain); } catch { }
+
+        var order = new Dictionary<string, int> { ["Danger"] = 0, ["Warn"] = 1, ["Info"] = 2, ["None"] = 3 };
+        return items
+            .OrderBy(i => order.TryGetValue(i.Risk, out int rank) ? rank : 9)
+            .ThenBy(i => i.Category + i.Name, StringComparer.Ordinal)
+            .ToList();
     }
 
     // ------------------------------ Collectors ------------------------------
@@ -385,6 +416,335 @@ public static class NetworkHealthService
             }
         }
         catch { }
+    }
+
+
+    private static void CollectKnownInterceptors(List<NetworkHealthItem> items, bool dnsFailureContext)
+    {
+        var running = GetRunningProcessNames();
+
+        bool proxifierProcess = running.Contains("Proxifier") || running.Contains("Proxifier64");
+        bool proxifierDriver = IsDriverLoaded("ProxifierDrv");
+        if (proxifierProcess || proxifierDriver)
+        {
+            string status = proxifierProcess && proxifierDriver
+                ? "进程运行中 + WFP 驱动已加载"
+                : proxifierProcess
+                    ? "进程运行中"
+                    : "WFP 驱动已加载";
+
+            var details = new List<string>
+            {
+                "Proxifier 可通过 WFP/透明代理影响不支持代理设置的程序，并可配置为通过代理解析主机名。"
+            };
+
+            var profileHints = GetProxifierProfileHints();
+            if (profileHints.Count > 0)
+                details.Add("检测到相关 profile：" + string.Join("；", profileHints));
+
+            string risk;
+            if (dnsFailureContext && proxifierDriver)
+                risk = "Danger";
+            else if (proxifierDriver || dnsFailureContext)
+                risk = "Warn";
+            else
+                risk = "Info";
+
+            items.Add(new NetworkHealthItem
+            {
+                Category = "网络接管软件",
+                Name = "Proxifier",
+                Status = status,
+                Detail = string.Join(" ", details),
+                Risk = risk
+            });
+        }
+
+        var known = new (string display, string[] processes, string detail)[]
+        {
+            ("Clash / Mihomo",
+                new[] { "mihomo", "clash", "clash-meta", "clash-verge", "clash-verge-service", "clash-nyanpasu", "FlClash" },
+                "可能通过系统代理、TUN 或透明转发接管流量。"),
+            ("sing-box",
+                new[] { "sing-box" },
+                "可能通过系统代理或 TUN 接管流量。"),
+            ("v2rayN / Xray",
+                new[] { "v2rayN", "xray", "v2ray" },
+                "代理核心正在运行，可能影响系统或应用网络路径。"),
+            ("Netch",
+                new[] { "Netch" },
+                "可能使用 WinDivert 等方式透明接管流量。"),
+            ("AdGuard",
+                new[] { "Adguard", "AdguardSvc" },
+                "可能启用 DNS 过滤、HTTPS 过滤或网络驱动。"),
+            ("NetLimiter",
+                new[] { "NetLimiter", "NLClientApp" },
+                "网络过滤/限速软件正在运行，规则可能影响连接。"),
+            ("Hiddify / NekoRay",
+                new[] { "Hiddify", "nekoray" },
+                "代理客户端正在运行，可能启用系统代理或 TUN。")
+        };
+
+        foreach (var app in known)
+        {
+            var matched = app.processes
+                .Where(p => running.Contains(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (matched.Count == 0) continue;
+
+            items.Add(new NetworkHealthItem
+            {
+                Category = "网络接管软件",
+                Name = app.display,
+                Status = "正在运行",
+                Detail = $"进程：{string.Join(", ", matched)}。{app.detail}" +
+                         (dnsFailureContext ? " 当前 DNS 解析同时失败，建议临时退出后重新测试以排除干扰。" : ""),
+                Risk = dnsFailureContext ? "Warn" : "Info"
+            });
+        }
+    }
+
+    private static HashSet<string> GetRunningProcessNames()
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var process in Process.GetProcesses())
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(process.ProcessName))
+                    names.Add(process.ProcessName);
+            }
+            catch { }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+        return names;
+    }
+
+    private static List<string> GetProxifierProfileHints()
+    {
+        var hints = new List<string>();
+        var candidates = new List<string>();
+
+        try
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            foreach (var dir in new[]
+            {
+                Path.Combine(appData, "Proxifier4", "Profiles"),
+                Path.Combine(appData, "Proxifier", "Profiles")
+            })
+            {
+                if (!Directory.Exists(dir)) continue;
+                candidates.AddRange(Directory.GetFiles(dir, "*.ppx")
+                    .OrderByDescending(File.GetLastWriteTimeUtc)
+                    .Take(4));
+            }
+
+            string programDataProfile = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "Proxifier", "Default.ppx");
+            if (File.Exists(programDataProfile))
+                candidates.Add(programDataProfile);
+        }
+        catch { }
+
+        foreach (var file in candidates.Distinct(StringComparer.OrdinalIgnoreCase).Take(5))
+        {
+            try
+            {
+                var doc = XDocument.Load(file);
+                var resolve = doc.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName.Equals("Resolve", StringComparison.OrdinalIgnoreCase));
+                if (resolve == null) continue;
+
+                bool viaProxy = resolve.Descendants()
+                    .Any(e => e.Name.LocalName.Equals("ViaProxy", StringComparison.OrdinalIgnoreCase)
+                           && string.Equals(e.Attribute("enabled")?.Value, "true", StringComparison.OrdinalIgnoreCase));
+                bool autoMode = resolve.Descendants()
+                    .Any(e => e.Name.LocalName.Equals("AutoModeDetection", StringComparison.OrdinalIgnoreCase)
+                           && string.Equals(e.Attribute("enabled")?.Value, "true", StringComparison.OrdinalIgnoreCase));
+
+                var flags = new List<string>();
+                if (viaProxy) flags.Add("ViaProxy=true");
+                if (autoMode) flags.Add("AutoModeDetection=true");
+                if (flags.Count == 0) continue;
+
+                hints.Add($"{Path.GetFileName(file)} ({string.Join(", ", flags)})，仅表示该配置文件包含此设置，未确认它就是当前活动 profile");
+            }
+            catch { }
+        }
+
+        return hints;
+    }
+
+    private static void CollectDnsTransport(List<NetworkHealthItem> items, string domain)
+    {
+        var servers = new List<IPAddress>();
+        try
+        {
+            servers = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(ni => ni.OperationalStatus == OperationalStatus.Up)
+                .SelectMany(ni =>
+                {
+                    try { return ni.GetIPProperties().DnsAddresses; }
+                    catch { return Array.Empty<IPAddress>(); }
+                })
+                .Where(ip => !ip.Equals(IPAddress.Any) && !ip.Equals(IPAddress.IPv6Any))
+                .Distinct()
+                .OrderBy(ip => ip.AddressFamily == AddressFamily.InterNetwork ? 0 : 1)
+                .Take(3)
+                .ToList();
+        }
+        catch { }
+
+        if (servers.Count == 0)
+        {
+            items.Add(new NetworkHealthItem
+            {
+                Category = "DNS 传输",
+                Name = "直接 DNS 探测",
+                Status = "未发现可用 DNS 服务器",
+                Detail = "活动网卡没有可用于探测的 DNS 服务器地址。请先检查网卡 DNS 配置。",
+                Risk = "Danger"
+            });
+            return;
+        }
+
+        var probeLines = new List<string>();
+        bool anyUdp = false;
+        bool anyTcp = false;
+
+        foreach (var server in servers)
+        {
+            bool udpOk = ProbeDnsUdp(server, domain, 1000);
+            bool tcpOk = false;
+            if (!udpOk)
+                tcpOk = ProbeDnsTcp(server, 53, 1000);
+
+            anyUdp |= udpOk;
+            anyTcp |= tcpOk;
+
+            probeLines.Add(udpOk
+                ? $"{server}: UDP/53 OK"
+                : tcpOk
+                    ? $"{server}: UDP/53 无响应，TCP/53 OK"
+                    : $"{server}: UDP/TCP 53 均失败");
+        }
+
+        if (anyUdp)
+        {
+            items.Add(new NetworkHealthItem
+            {
+                Category = "DNS 传输",
+                Name = "直接 DNS 探测",
+                Status = "UDP/53 可达，但系统解析失败",
+                Detail = "原始 DNS 请求已收到响应，优先检查 Windows 名称解析链、NRPT、Hosts 或第三方网络拦截。探测：" +
+                         string.Join("；", probeLines),
+                Risk = "Warn"
+            });
+        }
+        else if (anyTcp)
+        {
+            items.Add(new NetworkHealthItem
+            {
+                Category = "DNS 传输",
+                Name = "直接 DNS 探测",
+                Status = "UDP/53 无响应，TCP/53 可达",
+                Detail = "DNS 的 UDP 路径可能被过滤或接管。探测：" + string.Join("；", probeLines),
+                Risk = "Warn"
+            });
+        }
+        else
+        {
+            items.Add(new NetworkHealthItem
+            {
+                Category = "DNS 传输",
+                Name = "直接 DNS 探测",
+                Status = "UDP/TCP 53 均不可达",
+                Detail = "对当前配置 DNS 服务器的直接探测均失败。优先检查本机 WFP/过滤软件、防火墙、路由或上游网络，而不是继续更换域名。探测：" +
+                         string.Join("；", probeLines),
+                Risk = "Danger"
+            });
+        }
+    }
+
+    private static bool ProbeDnsUdp(IPAddress server, string domain, int timeoutMs)
+    {
+        try
+        {
+            using var udp = new UdpClient(server.AddressFamily);
+            udp.Client.SendTimeout = timeoutMs;
+            udp.Client.ReceiveTimeout = timeoutMs;
+            udp.Connect(server, 53);
+
+            byte[] query = BuildDnsQuery(domain);
+            udp.Send(query, query.Length);
+
+            var buffer = new byte[2048];
+            int received = udp.Client.Receive(buffer);
+            return received >= 12;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool ProbeDnsTcp(IPAddress server, int port, int timeoutMs)
+    {
+        try
+        {
+            using var tcp = new TcpClient(server.AddressFamily);
+            var connectTask = tcp.ConnectAsync(server, port);
+            return connectTask.Wait(timeoutMs) && tcp.Connected;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static byte[] BuildDnsQuery(string domain)
+    {
+        string host = (domain ?? "").Trim().TrimEnd('.');
+        try
+        {
+            host = new System.Globalization.IdnMapping().GetAscii(host);
+        }
+        catch
+        {
+            host = "example.com";
+        }
+
+        var labels = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (labels.Length == 0 || labels.Any(label => label.Length > 63))
+            labels = new[] { "example", "com" };
+
+        var packet = new List<byte>(64)
+        {
+            0x57, 0x4E, // transaction ID: "WN"
+            0x01, 0x00, // recursion desired
+            0x00, 0x01, // one question
+            0x00, 0x00, // answer count
+            0x00, 0x00, // authority count
+            0x00, 0x00  // additional count
+        };
+
+        foreach (var label in labels)
+        {
+            byte[] bytes = Encoding.ASCII.GetBytes(label);
+            packet.Add((byte)bytes.Length);
+            packet.AddRange(bytes);
+        }
+
+        packet.Add(0x00);
+        packet.Add(0x00); packet.Add(0x01); // QTYPE A
+        packet.Add(0x00); packet.Add(0x01); // QCLASS IN
+        return packet.ToArray();
     }
 
     private static void CollectVpn(List<NetworkHealthItem> items)
