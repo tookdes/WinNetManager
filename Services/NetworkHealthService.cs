@@ -588,7 +588,7 @@ public static class NetworkHealthService
         {
             servers = NetworkInterface.GetAllNetworkInterfaces()
                 .Where(ni => ni.OperationalStatus == OperationalStatus.Up)
-                .SelectMany(ni =>
+                .SelectMany<NetworkInterface, IPAddress>(ni =>
                 {
                     try { return ni.GetIPProperties().DnsAddresses; }
                     catch { return Array.Empty<IPAddress>(); }
