@@ -181,6 +181,7 @@ public partial class DnsTab : UserControl, IRefreshableTab
         }
 
         TxtResolveResult.Text = $"正在解析 {domain}...";
+        DnsFailureHint.Visibility = Visibility.Collapsed;
 
         try
         {
@@ -190,18 +191,85 @@ public partial class DnsTab : UserControl, IRefreshableTab
                 TxtResolveResult.Text = res.Records.Count > 0
                     ? string.Join("\n", res.Records)
                     : "未解析到记录。";
+                DnsFailureHint.Visibility = Visibility.Collapsed;
                 SetStatus($"{domain}：{res.Message}");
             }
             else
             {
                 TxtResolveResult.Text = $"解析失败：{res.Message}";
-                SetStatus($"解析 {domain} 失败");
+                SetStatus($"解析 {domain} 失败，正在快速诊断...");
+                await ShowDnsFailureDiagnosticsAsync(domain);
             }
         }
         catch (Exception ex)
         {
             TxtResolveResult.Text = $"错误：{ex.Message}";
+            SetStatus($"解析 {domain} 异常，正在快速诊断...");
+            await ShowDnsFailureDiagnosticsAsync(domain);
         }
+    }
+
+    private async Task ShowDnsFailureDiagnosticsAsync(string domain)
+    {
+        List<NetworkHealthItem> items;
+        try
+        {
+            items = await Task.Run(() => NetworkHealthService.GetDnsFailureSnapshot(domain));
+        }
+        catch (Exception ex)
+        {
+            TbkDnsFailureHint.Text = $"快速诊断失败：{ex.Message}";
+            DnsFailureHint.Visibility = Visibility.Visible;
+            SetStatus($"解析 {domain} 失败");
+            return;
+        }
+
+        var relevant = items
+            .Where(i => i.Risk == "Danger" || i.Risk == "Warn")
+            .Take(4)
+            .ToList();
+
+        if (relevant.Count == 0)
+        {
+            TbkDnsFailureHint.Text =
+                "DNS 解析失败，但快速诊断未发现明确的本机接管或过滤线索。可打开完整网络健康扫描继续排查。";
+        }
+        else
+        {
+            var lines = relevant.Select(i => $"• {i.Name}：{i.Status} — {i.Detail}");
+            TbkDnsFailureHint.Text =
+                "检测到可能与本次 DNS 故障相关的项目：\n" + string.Join("\n", lines);
+        }
+
+        DnsFailureHint.Visibility = Visibility.Visible;
+        SetStatus($"解析 {domain} 失败；快速诊断发现 {relevant.Count} 项需关注");
+    }
+
+    private void BtnRetryResolve_Click(object sender, RoutedEventArgs e) =>
+        BtnResolve_Click(sender, e);
+
+    private async void BtnDnsHealthScan_Click(object sender, RoutedEventArgs e)
+    {
+        SetStatus("正在扫描网络健康状态...");
+
+        List<NetworkHealthItem> items;
+        try
+        {
+            items = await Task.Run(() => NetworkHealthService.GetSnapshot());
+        }
+        catch (Exception ex)
+        {
+            CopyableMessageBox.Show($"扫描失败：{ex.Message}", "错误", MessageBoxImage.Error);
+            SetStatus("扫描失败");
+            return;
+        }
+
+        var win = new NetworkHealthWindow(items)
+        {
+            Owner = Window.GetWindow(this)
+        };
+        win.ShowDialog();
+        SetStatus("网络健康扫描完成");
     }
 
     private async void BtnFlushDns_Click(object sender, RoutedEventArgs e)
