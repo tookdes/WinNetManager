@@ -381,25 +381,13 @@ public static class NetworkHealthService
                         Risk = "Warn"
                     });
                 }
-                else if (wh.AccessType == WinHttpAccessTypeAutomaticProxy)
-                {
-                    items.Add(new NetworkHealthItem
-                    {
-                        Category = "代理",
-                        Name = "WinHTTP 代理",
-                        Status = "自动代理",
-                        Detail = "WinHTTP 使用自动代理配置。",
-                        Risk = "Info"
-                    });
-                }
-            }
+             }
         }
         catch { }
     }
 
 
     private const uint WinHttpAccessTypeNamedProxy = 3;
-    private const uint WinHttpAccessTypeAutomaticProxy = 4;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WinHttpProxyInfoNative
