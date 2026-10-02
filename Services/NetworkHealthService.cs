@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Xml.Linq;
 using Microsoft.Win32;
@@ -326,21 +327,10 @@ public static class NetworkHealthService
             string? proxyOverride = key.GetValue("ProxyOverride") as string;
             string? autoConfigUrl = key.GetValue("AutoConfigURL") as string;
 
-            // WinHTTP proxy — netsh 输出使用系统 OEM 代码页（中文系统为 GBK），
-            // 先临时把 Console 输出编码切到 OEM 代码页捕获 netsh 输出，再切回 UTF-8 输出，
-            // 避免中文系统上解码乱码导致误报。
-            string? winHttpProxy = null;
-            try
-            {
-                string output = ProcessRunner.RunPowerShell(
-                    "try { $oem = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::InstalledUICulture.TextInfo.OEMCodePage); " +
-                    "[Console]::OutputEncoding = $oem; $r = & netsh winhttp show proxy; " +
-                    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $r } catch { $null }",
-                    out _, 5000);
-                if (!string.IsNullOrWhiteSpace(output))
-                    winHttpProxy = output.Trim();
-            }
-            catch { }
+            // WinHTTP 代理直接通过 winhttp.dll 获取，避免解析 netsh 的本地化文本。
+            // netsh 在不同 Windows 语言/代码页下可能输出 OEM/ANSI 文本，而 ProcessRunner
+            // 统一按 UTF-8 读取 stdout，容易造成中文乱码。
+            var winHttpProxy = GetWinHttpProxyConfiguration();
 
             if (proxyEnable == 1 && !string.IsNullOrWhiteSpace(proxyServer))
             {
@@ -377,47 +367,62 @@ public static class NetworkHealthService
                 });
             }
 
-            if (!string.IsNullOrWhiteSpace(winHttpProxy))
+            if (winHttpProxy is { } wh)
             {
-                // 多语言匹配：中文"直接访问"/"直接连接"，英文"Direct access"/"no proxy"
-                bool isDirect = winHttpProxy.Contains("直接访问", StringComparison.OrdinalIgnoreCase)
-                             || winHttpProxy.Contains("直接连接", StringComparison.OrdinalIgnoreCase)
-                             || winHttpProxy.Contains("Direct access", StringComparison.OrdinalIgnoreCase)
-                             || winHttpProxy.Contains("no proxy", StringComparison.OrdinalIgnoreCase);
-                // 只在实际设置了代理时才报告，直接连接不算风险
-                if (!isDirect)
+                if (wh.AccessType == WinHttpAccessTypeNamedProxy && !string.IsNullOrWhiteSpace(wh.Proxy))
                 {
-                    // 提取代理服务器地址，不展示原始 netsh 输出。避免匹配到包含冒号的标题行。
-                    string? line = winHttpProxy.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                        .FirstOrDefault(l => (l.Contains("Proxy Server", StringComparison.OrdinalIgnoreCase)
-                                           || l.Contains("代理服务器"))
-                                          && !l.Contains("设置", StringComparison.OrdinalIgnoreCase)
-                                          && !l.Contains("settings", StringComparison.OrdinalIgnoreCase));
-
-                    string proxyAddr = winHttpProxy;
-                    if (line != null)
-                    {
-                        int colonIdx = line.IndexOf(':');
-                        if (colonIdx >= 0)
-                        {
-                            proxyAddr = line.Substring(colonIdx + 1).Trim();
-                        }
-                    }
-
                     items.Add(new NetworkHealthItem
                     {
                         Category = "代理",
                         Name = "WinHTTP 代理",
                         Status = "已设置代理",
-                        Detail = proxyAddr.Length > 120 ? proxyAddr[..120] + "..." : proxyAddr,
+                        Detail = $"服务器：{wh.Proxy}" +
+                                 (string.IsNullOrWhiteSpace(wh.Bypass) ? "" : $"  |  例外：{wh.Bypass}"),
                         Risk = "Warn"
                     });
                 }
-            }
+             }
         }
         catch { }
     }
 
+
+    private const uint WinHttpAccessTypeNamedProxy = 3;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WinHttpProxyInfoNative
+    {
+        public uint AccessType;
+        public IntPtr Proxy;
+        public IntPtr ProxyBypass;
+    }
+
+    [DllImport("winhttp.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WinHttpGetDefaultProxyConfiguration(out WinHttpProxyInfoNative proxyInfo);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GlobalFree(IntPtr hMem);
+
+    private static (uint AccessType, string? Proxy, string? Bypass)? GetWinHttpProxyConfiguration()
+    {
+        if (!WinHttpGetDefaultProxyConfiguration(out var info))
+            return null;
+
+        try
+        {
+            return (
+                info.AccessType,
+                info.Proxy == IntPtr.Zero ? null : Marshal.PtrToStringUni(info.Proxy),
+                info.ProxyBypass == IntPtr.Zero ? null : Marshal.PtrToStringUni(info.ProxyBypass)
+            );
+        }
+        finally
+        {
+            if (info.Proxy != IntPtr.Zero) GlobalFree(info.Proxy);
+            if (info.ProxyBypass != IntPtr.Zero) GlobalFree(info.ProxyBypass);
+        }
+    }
 
     private static void CollectKnownInterceptors(List<NetworkHealthItem> items, bool dnsFailureContext)
     {
