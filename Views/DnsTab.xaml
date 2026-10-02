@@ -43,6 +43,19 @@
                     </StackPanel>
                     <TextBlock DockPanel.Dock="Top" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,4"
                                Text="使用 Resolve-DnsName 解析域名，显示 A/AAAA/CNAME 记录。"/>
+                    <Border x:Name="DnsFailureHint" DockPanel.Dock="Bottom" Visibility="Collapsed"
+                            Margin="0,8,0,0" Padding="8" CornerRadius="4"
+                            Background="{DynamicResource RiskWarnBgBrush}"
+                            BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock x:Name="TbkDnsFailureHint" TextWrapping="Wrap" FontSize="11"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="重新测试" Padding="10,3" Click="BtnRetryResolve_Click"/>
+                                <Button Content="查看完整诊断" Padding="10,3" Margin="6,0,0,0"
+                                        Click="BtnDnsHealthScan_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                     <TextBox x:Name="TxtResolveResult" IsReadOnly="True" Height="60"
                              Background="{DynamicResource ResultBoxBgBrush}" FontFamily="Consolas" FontSize="12"
                              TextWrapping="Wrap" VerticalScrollBarVisibility="Auto">
