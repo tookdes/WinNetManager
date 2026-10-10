@@ -1144,9 +1144,9 @@ Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows
             log.AppendLine(convErr);
             log.AppendLine($"exit={convCode}");
 
-            string pcapArgs = $"pcapng \"{etl}\" --out \"{pcapng}\"";
+            string pcapArgs = $"etl2pcap \"{etl}\" --out \"{pcapng}\"";
             string pcap = ProcessRunner.RunNative("pktmon.exe", pcapArgs, out string pcapErr, out int pcapCode, 30000);
-            log.AppendLine("=== pktmon pcapng ===");
+            log.AppendLine("=== pktmon etl2pcap ===");
             log.AppendLine(pcap);
             log.AppendLine(pcapErr);
             log.AppendLine($"exit={pcapCode}");
