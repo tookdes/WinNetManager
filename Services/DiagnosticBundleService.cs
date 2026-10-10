@@ -561,7 +561,7 @@ Get-NetUDPEndpoint -ErrorAction SilentlyContinue |
 
             ("10-events/network-events-48h.txt", "收集最近 48 小时网络相关系统事件", """
 $start = (Get-Date).AddHours(-48)
-Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start} -ErrorAction SilentlyContinue |
+Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start} -MaxEvents 5000 -ErrorAction SilentlyContinue |
   Where-Object {
     $_.Id -in @(1014,4199,4201,1001,1002,50036,50058,50067,10400,10401,10402,10403) -or
     $_.ProviderName -match 'Tcpip|Dhcp|DNS|NlaSvc|NetworkProfile|WLAN|NDIS|Netwtw|e2f|e2fn|Realtek|rt640x|Kernel-PnP'
@@ -574,6 +574,20 @@ Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start} -ErrorAction 
 $start = (Get-Date).AddHours(-48)
 Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-DNS-Client';StartTime=$start} -ErrorAction SilentlyContinue |
   Select-Object -First 500 TimeCreated,Id,LevelDisplayName,Message |
+  Format-List * | Out-String -Width 4096
+""", 20000),
+
+            ("10-events/wlan-events-48h.txt", "收集最近 48 小时 Wi-Fi 连接事件", """
+$start = (Get-Date).AddHours(-48)
+Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-WLAN-AutoConfig/Operational';StartTime=$start} -ErrorAction SilentlyContinue |
+  Select-Object -First 800 TimeCreated,Id,LevelDisplayName,Message |
+  Format-List * | Out-String -Width 4096
+""", 20000),
+
+            ("10-events/network-profile-events-48h.txt", "收集最近 48 小时网络位置变化事件", """
+$start = (Get-Date).AddHours(-48)
+Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operational';StartTime=$start} -ErrorAction SilentlyContinue |
+  Select-Object -First 800 TimeCreated,Id,LevelDisplayName,Message |
   Format-List * | Out-String -Width 4096
 """, 20000)
         };
