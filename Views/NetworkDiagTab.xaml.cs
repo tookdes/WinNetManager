@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Controls;
 using WinNetManager.Services;
@@ -230,6 +231,99 @@ public partial class NetworkDiagTab : UserControl
         catch (Exception ex)
         {
             CopyableMessageBox.Show($"启动失败：{ex.Message}", "错误", MessageBoxImage.Error);
+        }
+    }
+
+    private async void BtnDiagnosticBundle_Click(object sender, RoutedEventArgs e)
+    {
+        var owner = Window.GetWindow(this);
+        string safeMachine = string.Concat(Environment.MachineName.Select(ch =>
+            char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
+
+        var save = new SaveFileDialog
+        {
+            Title = "保存 WinNetManager 深度诊断包",
+            Filter = "ZIP 压缩包 (*.zip)|*.zip",
+            DefaultExt = ".zip",
+            AddExtension = true,
+            FileName = $"WinNetManager-Diagnostics-{safeMachine}-{DateTime.Now:yyyyMMdd-HHmmss}.zip"
+        };
+
+        if (save.ShowDialog(owner) != true)
+            return;
+
+        bool includeCapture = ChkPacketCapture.IsChecked == true;
+        if (includeCapture)
+        {
+            var confirm = MessageBox.Show(
+                "PktMon 将抓取约 10 秒网络数据（每包截取前 128 字节）。\n\n" +
+                "它有助于分析 ARP/广播风暴和异常流量，但可能包含敏感网络元数据。\n" +
+                "确定要把抓包文件一起放进诊断包吗？",
+                "确认附带抓包",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes)
+                includeCapture = false;
+        }
+
+        BtnDiagnosticBundle.IsEnabled = false;
+        BtnRefresh.IsEnabled = false;
+        var progress = new Progress<string>(msg => SetStatus($"深度诊断：{msg}"));
+
+        DiagnosticBundleResult result;
+        try
+        {
+            result = await Task.Run(() => DiagnosticBundleService.Create(
+                save.FileName,
+                new DiagnosticBundleOptions
+                {
+                    IncludePacketCapture = includeCapture,
+                    PacketCaptureSeconds = 10
+                },
+                progress));
+        }
+        catch (Exception ex)
+        {
+            CopyableMessageBox.Show(
+                $"生成诊断包时发生未处理错误：\n{ex}",
+                "深度诊断失败",
+                MessageBoxImage.Error,
+                owner);
+            SetStatus("深度诊断失败");
+            return;
+        }
+        finally
+        {
+            BtnDiagnosticBundle.IsEnabled = true;
+            BtnRefresh.IsEnabled = true;
+        }
+
+        if (result.Success)
+        {
+            SetStatus($"诊断包已生成：{result.FileCount} 个文件，耗时 {result.Duration.TotalSeconds:F0} 秒");
+            CopyableMessageBox.Show(
+                $"深度诊断包已生成。\n\n" +
+                $"文件：{result.ZipPath}\n" +
+                $"采集文件：{result.FileCount}\n" +
+                $"自动警告/风险：{result.WarningCount}\n" +
+                $"采集步骤异常：{result.ErrorCount}\n" +
+                $"耗时：{result.Duration.TotalSeconds:F1} 秒\n\n" +
+                "诊断包默认只读采集，不会修改 IP、DNS、路由、防火墙或重启网卡。\n" +
+                "包内可能包含 IP/MAC、SSID/BSSID、代理/VPN 地址、活动连接和网络事件，发送前请确认接收方可信。",
+                "深度诊断完成",
+                result.ErrorCount > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information,
+                owner);
+        }
+        else
+        {
+            SetStatus("深度诊断包生成失败");
+            CopyableMessageBox.Show(
+                $"诊断包生成失败：{result.ErrorMessage}\n\n" +
+                $"已采集的临时文件保留在：\n{result.WorkingDirectory}\n\n" +
+                "可从该目录手动取出已完成的诊断信息。",
+                "深度诊断失败",
+                MessageBoxImage.Error,
+                owner);
         }
     }
 
