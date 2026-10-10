@@ -1136,7 +1136,7 @@ public static class NetworkHealthService
         _loadedDrivers.Clear();
         try
         {
-            string output = ProcessRunner.Run("driverquery", "/FO CSV /SVC", out _, 8000);
+            string output = ProcessRunner.RunNative("driverquery.exe", "/FO CSV /SVC", out _, 8000);
             var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var line in lines)
             {
