@@ -396,6 +396,11 @@ Get-DnsClient -ErrorAction SilentlyContinue |
 Get-DnsClientNrptRule -ErrorAction SilentlyContinue |
   Select-Object Name,Namespace,NameServers,Comment,GpoName |
   Format-Table -AutoSize | Out-String -Width 4096
+"=== DoH servers (if supported) ==="
+if (Get-Command Get-DnsClientDohServerAddress -ErrorAction SilentlyContinue) {
+  Get-DnsClientDohServerAddress -ErrorAction SilentlyContinue |
+    Format-Table -AutoSize | Out-String -Width 4096
+}
 """, 20000),
 
             ("04-dns/hosts.txt", "收集 Hosts 文件", """
