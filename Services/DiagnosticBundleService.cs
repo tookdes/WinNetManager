@@ -346,6 +346,16 @@ Get-NetAdapterAdvancedProperty -IncludeHidden -AllProperties -ErrorAction Silent
   Format-Table -AutoSize | Out-String -Width 4096
 """, 25000),
 
+            ("02-adapters/statistics-cumulative.txt", "收集网卡累计统计计数", """
+Get-NetAdapterStatistics -IncludeHidden -ErrorAction SilentlyContinue |
+  Format-List * | Out-String -Width 4096
+""", 15000),
+
+            ("02-adapters/power-management.txt", "收集网卡电源管理设置", """
+Get-NetAdapterPowerManagement -ErrorAction SilentlyContinue |
+  Format-List * | Out-String -Width 4096
+""", 15000),
+
             ("02-adapters/tcp-offload-settings.txt", "收集 TCP / RSS / Offload 全局设置", """
 "=== TCP settings ==="
 Get-NetTCPSetting -ErrorAction SilentlyContinue |
@@ -446,6 +456,13 @@ Get-NetConnectionProfile -ErrorAction SilentlyContinue |
   Select-Object Name,InterfaceAlias,InterfaceIndex,NetworkCategory,IPv4Connectivity,IPv6Connectivity |
   Format-Table -AutoSize | Out-String -Width 4096
 """, 15000),
+
+            ("05-connectivity/ncsi-settings.txt", "收集 Windows NCSI 联网探测设置", """
+Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\NlaSvc\Parameters\Internet' -ErrorAction SilentlyContinue |
+  Select-Object EnableActiveProbing,ActiveDnsProbeContent,ActiveDnsProbeHost,ActiveWebProbeContent,
+                ActiveWebProbeHost,ActiveWebProbePath |
+  Format-List * | Out-String -Width 4096
+""", 10000),
 
             ("05-connectivity/traceroute-223.5.5.5.txt", "Traceroute 到阿里 DNS 223.5.5.5", """
 Test-NetConnection -ComputerName '223.5.5.5' -TraceRoute -WarningAction SilentlyContinue |
@@ -784,24 +801,9 @@ Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows
             sb.AppendLine($"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{r.Sent}\t{r.Received}\t{r.LossPercent:F1}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
         WriteText(root, "05-connectivity/ping-tests.tsv", sb.ToString());
 
-        foreach (var g in results.Where(r => r.Kind == "Gateway"))
+        foreach (var g in results.Where(r => r.Kind == "Gateway" && r.Received > 0 && r.LossPercent >= 20))
         {
-            if (g.Received == 0)
-            {
-                findings.Add($"[危险] 默认/接口网关 {g.Target} 完全不可 Ping；可能是本地链路、VLAN、网关或 IP 配置问题。");
-                warningCount++;
-            }
-            else if (g.LossPercent >= 20)
-            {
-                findings.Add($"[警告] 网关 {g.Target} 丢包 {g.LossPercent:F0}%，本地链路质量异常。");
-                warningCount++;
-            }
-        }
-
-        var domestic = results.Where(r => r.Target is "223.5.5.5" or "119.29.29.29").ToList();
-        if (domestic.Count > 0 && domestic.All(r => r.Received == 0))
-        {
-            findings.Add("[警告] 两个国内公共 IPv4 目标均不可达；若网关正常，重点检查上游出口、路由、防火墙或运营商链路。");
+            findings.Add($"[警告] 网关 {g.Target} 可达但丢包 {g.LossPercent:F0}%，本地链路质量异常。");
             warningCount++;
         }
 
@@ -959,6 +961,19 @@ Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows
         {
             findings.Add("[警告] 网关可达，但国内公共 IPv4 均不可达：故障更可能位于默认路由之后（上游出口、运营商、防火墙或策略路由）。");
             warningCount++;
+        }
+
+        if (gateways.Count > 0 && gateways.All(p => p.Received == 0))
+        {
+            if (anyV4Works)
+            {
+                findings.Add("[提示] 网关不响应 ICMP，但公共 IPv4 可达：网关很可能只是禁用了 Ping，不应据此判定网关故障。");
+            }
+            else
+            {
+                findings.Add("[警告] 网关与公共 IPv4 都不可 Ping：优先检查物理/Wi-Fi 链路、VLAN、DHCP/IP 配置和默认网关；同时注意部分设备可能禁用 ICMP。");
+                warningCount++;
+            }
         }
 
         if (domesticWorks && domainResolutionFailed)
