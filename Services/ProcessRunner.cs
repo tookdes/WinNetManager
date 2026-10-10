@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -59,6 +60,40 @@ public static class ProcessRunner
 
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
+
+        return Run(psi, out error, out exitCode, timeoutMs);
+    }
+
+    /// <summary>
+    /// Runs a native Windows console tool using the installed UI culture's OEM code page.
+    /// This avoids mojibake from tools such as ipconfig/netsh/route/driverquery on non-English Windows.
+    /// Falls back to Console.OutputEncoding if the legacy code page is unavailable.
+    /// </summary>
+    public static string RunNative(string fileName, string arguments, out string error, int timeoutMs = 30000)
+        => RunNative(fileName, arguments, out error, out _, timeoutMs);
+
+    public static string RunNative(string fileName, string arguments, out string error, out int exitCode, int timeoutMs = 30000)
+    {
+        Encoding encoding = Console.OutputEncoding;
+        try
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            int codePage = CultureInfo.InstalledUICulture.TextInfo.OEMCodePage;
+            encoding = Encoding.GetEncoding(codePage);
+        }
+        catch { }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = encoding,
+            StandardErrorEncoding = encoding,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
 
         return Run(psi, out error, out exitCode, timeoutMs);
     }

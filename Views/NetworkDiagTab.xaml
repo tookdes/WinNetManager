@@ -11,6 +11,13 @@
             <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button Content="网络健康扫描" Padding="12,4" Margin="6,0,0,0" Click="BtnHealthScan_Click"
                     ToolTip="扫描常见的网络干扰源和异常配置（WinDivert/TUN/代理/PAC/VPN/WFP 等）"/>
+            <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
+            <Button x:Name="BtnDiagnosticBundle" Content="生成深度诊断包" Padding="12,4" Margin="6,0,0,0"
+                    Click="BtnDiagnosticBundle_Click"
+                    ToolTip="离线深度诊断：只读采集 IP/DNS/网关/路由/丢包/Traceroute/事件日志/连接/防火墙等，并压缩为 ZIP"/>
+            <CheckBox x:Name="ChkPacketCapture" Content="附带 10 秒 PktMon 抓包" Margin="10,0,0,0"
+                      VerticalAlignment="Center"
+                      ToolTip="可帮助分析 ARP/广播风暴和异常流量；可能包含敏感网络元数据，默认关闭"/>
         </StackPanel>
 
         <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
