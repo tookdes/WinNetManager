@@ -221,6 +221,7 @@ public static class DiagnosticBundleService
             }
             catch { }
 
+            AnalyzeConnectivity(findings, pingResults, httpResults, ref warningCount);
             AddStructuralFindings(findings, ref warningCount);
 
             if (options.IncludePacketCapture)
@@ -345,6 +346,20 @@ Get-NetAdapterAdvancedProperty -IncludeHidden -AllProperties -ErrorAction Silent
   Format-Table -AutoSize | Out-String -Width 4096
 """, 25000),
 
+            ("02-adapters/tcp-offload-settings.txt", "收集 TCP / RSS / Offload 全局设置", """
+"=== TCP settings ==="
+Get-NetTCPSetting -ErrorAction SilentlyContinue |
+  Select-Object SettingName,CongestionProvider,AutoTuningLevelLocal,EcnCapability,ScalingHeuristics,InitialRto,MinRto |
+  Format-Table -AutoSize | Out-String -Width 4096
+"=== Offload global settings ==="
+Get-NetOffloadGlobalSetting -ErrorAction SilentlyContinue |
+  Format-List * | Out-String -Width 4096
+"=== RSS ==="
+Get-NetAdapterRss -ErrorAction SilentlyContinue |
+  Select-Object Name,Enabled,NumberOfReceiveQueues,Profile,BaseProcessorNumber,MaxProcessorNumber |
+  Format-Table -AutoSize | Out-String -Width 4096
+""", 20000),
+
             ("03-routing/routes-active.txt", "收集活动路由表", """
 Get-NetRoute -IncludeAllCompartments -ErrorAction SilentlyContinue |
   Select-Object AddressFamily,DestinationPrefix,NextHop,RouteMetric,InterfaceMetric,ifIndex,InterfaceAlias,
@@ -382,6 +397,11 @@ Get-DnsClientNrptRule -ErrorAction SilentlyContinue |
   Select-Object Name,Namespace,NameServers,Comment,GpoName |
   Format-Table -AutoSize | Out-String -Width 4096
 """, 20000),
+
+            ("04-dns/hosts.txt", "收集 Hosts 文件", """
+$path = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
+if (Test-Path $path) { Get-Content $path -ErrorAction SilentlyContinue } else { 'Hosts file not found.' }
+""", 10000),
 
             ("04-dns/resolve-tests.txt", "测试系统 DNS 与每个已配置 DNS 服务器", """
 $names = @('www.baidu.com','www.qq.com','www.microsoft.com','github.com')
@@ -432,6 +452,15 @@ Test-NetConnection -ComputerName '1.1.1.1' -TraceRoute -WarningAction SilentlyCo
   Format-List * | Out-String -Width 4096
 """, 45000),
 
+            ("03-routing/nat-compartments.txt", "收集 NAT 与网络隔离 compartment", """
+"=== NetNat ==="
+Get-NetNat -ErrorAction SilentlyContinue | Format-List * | Out-String -Width 4096
+"=== NetCompartment ==="
+Get-NetCompartment -ErrorAction SilentlyContinue |
+  Select-Object CompartmentId,CompartmentDescription,CompartmentType,Status |
+  Format-Table -AutoSize | Out-String -Width 4096
+""", 15000),
+
             ("06-proxy-vpn/wininet-proxy.txt", "收集 WinINET / PAC 代理设置", """
 Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue |
   Select-Object ProxyEnable,ProxyServer,ProxyOverride,AutoConfigURL,AutoDetect |
@@ -475,7 +504,7 @@ foreach ($r in $rules) {
 
             ("08-services/services.txt", "收集关键网络服务", """
 $names = @('Dhcp','Dnscache','NlaSvc','netprofm','WlanSvc','iphlpsvc','WinHttpAutoProxySvc',
-           'BFE','MpsSvc','PolicyAgent','IKEEXT','RemoteAccess','RasMan','lmhosts')
+           'BFE','MpsSvc','PolicyAgent','IKEEXT','RemoteAccess','RasMan','lmhosts','SharedAccess')
 Get-Service -ErrorAction SilentlyContinue |
   Where-Object { $names -contains $_.Name -or $_.Name -match 'tailscale|zerotier|wireguard|proxifier|adguard|netlimiter' } |
   Select-Object Name,DisplayName,Status,StartType |
@@ -540,6 +569,11 @@ Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows
             ("03-routing/netsh-ipv6-routes.txt", "收集 netsh IPv6 路由", "netsh.exe", "interface ipv6 show route", 15000),
             ("02-adapters/wlan-interfaces.txt", "收集当前 Wi-Fi 连接", "netsh.exe", "wlan show interfaces", 15000),
             ("02-adapters/wlan-drivers.txt", "收集 Wi-Fi 驱动能力", "netsh.exe", "wlan show drivers", 15000),
+            ("02-adapters/tcp-global.txt", "收集 netsh TCP 全局设置", "netsh.exe", "interface tcp show global", 15000),
+            ("02-adapters/ipv6-prefix-policies.txt", "收集 IPv6 前缀优先级策略", "netsh.exe", "interface ipv6 show prefixpolicies", 15000),
+            ("02-adapters/teredo-state.txt", "收集 Teredo 状态", "netsh.exe", "interface teredo show state", 10000),
+            ("06-proxy-vpn/winhttp-proxy.txt", "收集 WinHTTP 代理", "netsh.exe", "winhttp show proxy", 10000),
+            ("06-proxy-vpn/portproxy.txt", "收集 portproxy 转发规则", "netsh.exe", "interface portproxy show all", 10000),
             ("08-services/winsock-catalog.txt", "收集 Winsock Catalog", "netsh.exe", "winsock show catalog", 20000),
             ("08-services/driverquery.csv", "导出驱动列表", "driverquery.exe", "/FO CSV /V /SVC", 25000),
             ("09-connections/netstat-ano.txt", "运行 netstat -ano", "netstat.exe", "-ano", 20000),
@@ -872,7 +906,7 @@ Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows
                 Timeout = TimeSpan.FromSeconds(7)
             };
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            using var response = client.Send(request, HttpCompletionOption.ResponseHeadersRead);
+            using var response = client.Send(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None);
             r.Success = true;
             r.StatusCode = (int)response.StatusCode;
             r.Detail = response.ReasonPhrase ?? "";
@@ -896,6 +930,72 @@ Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows
             "(Get-WinEvent -FilterHashtable @{LogName='System';Id=4199;StartTime=$s} -ErrorAction SilentlyContinue | Measure-Object).Count",
             out _, 10000);
         return int.TryParse(output.Trim(), out int count) ? count : 0;
+    }
+
+    private static void AnalyzeConnectivity(
+        List<string> findings,
+        List<PingProbeResult> pings,
+        List<HttpProbeResult> http,
+        ref int warningCount)
+    {
+        var gateways = pings.Where(p => p.Kind == "Gateway").ToList();
+        var domesticV4 = pings.Where(p => p.Target is "223.5.5.5" or "119.29.29.29").ToList();
+        var publicV4 = pings.Where(p => p.Kind.StartsWith("Public IPv4", StringComparison.Ordinal)).ToList();
+        var publicV6 = pings.Where(p => p.Kind.StartsWith("Public IPv6", StringComparison.Ordinal)).ToList();
+        var domains = pings.Where(p => p.Kind.StartsWith("Domain", StringComparison.Ordinal)).ToList();
+
+        bool gatewayWorks = gateways.Count == 0 || gateways.Any(p => p.Received > 0);
+        bool domesticWorks = domesticV4.Any(p => p.Received > 0);
+        bool anyV4Works = publicV4.Any(p => p.Received > 0);
+        bool domainResolutionFailed = domains.Count > 0 && domains.All(p =>
+            string.IsNullOrWhiteSpace(p.ResolvedAddress) || !string.IsNullOrWhiteSpace(p.Error));
+
+        if (gatewayWorks && domesticV4.Count > 0 && domesticV4.All(p => p.Received == 0))
+        {
+            findings.Add("[警告] 网关可达，但国内公共 IPv4 均不可达：故障更可能位于默认路由之后（上游出口、运营商、防火墙或策略路由）。");
+            warningCount++;
+        }
+
+        if (domesticWorks && domainResolutionFailed)
+        {
+            findings.Add("[危险] 公共 IPv4 可达但常用域名均无法完成 DNS 解析：高度提示 DNS/NRPT/Hosts/代理接管问题。");
+            warningCount++;
+        }
+
+        if (publicV6.Count > 0 && anyV4Works && publicV6.All(p => p.Received == 0))
+        {
+            findings.Add("[警告] IPv4 公网连通，但已配置全局 IPv6 的情况下两个 IPv6 公共目标均不可达：疑似 IPv6 路由/RA/上游问题。");
+            warningCount++;
+        }
+
+        if (publicV6.Any(p => p.Received > 0) && publicV4.Count > 0 && publicV4.All(p => p.Received == 0))
+        {
+            findings.Add("[警告] IPv6 公网可达而 IPv4 公共目标均不可达：重点检查 IPv4 DHCP、默认路由、NAT 或运营商 IPv4 出口。");
+            warningCount++;
+        }
+
+        var direct = http.Where(h => h.Mode.StartsWith("Direct", StringComparison.Ordinal)).ToList();
+        var proxied = http.Where(h => h.Mode.StartsWith("System proxy", StringComparison.Ordinal)).ToList();
+        int directOk = direct.Count(h => h.Success);
+        int proxyOk = proxied.Count(h => h.Success);
+
+        if (direct.Count > 0 && proxied.Count > 0)
+        {
+            if (directOk > 0 && proxyOk == 0)
+            {
+                findings.Add("[警告] HTTP/HTTPS 直连至少部分成功，但系统代理路径全部失败：系统代理/PAC/本地代理端口可能配置错误或代理进程未运行。");
+                warningCount++;
+            }
+            else if (directOk == 0 && proxyOk > 0)
+            {
+                findings.Add("[提示] 直连 HTTP/HTTPS 全部失败但系统代理路径可用：当前网络可能依赖代理才能出网，排障时不要仅依据代理后的浏览器访问判断物理链路。");
+            }
+            else if (directOk == 0 && proxyOk == 0 && anyV4Works)
+            {
+                findings.Add("[警告] ICMP 公网目标可达，但直连和系统代理 HTTP/HTTPS 均失败：重点检查 DNS、TCP/443、TLS、透明过滤或防火墙。");
+                warningCount++;
+            }
+        }
     }
 
     private static void AddStructuralFindings(List<string> findings, ref int warningCount)
