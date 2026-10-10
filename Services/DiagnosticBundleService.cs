@@ -12,6 +12,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace WinNetManager.Services;
 
@@ -805,9 +806,10 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             probes.Add(("2606:4700:4700::1111", "Public IPv6 / Cloudflare"));
         }
 
-        var results = new List<PingProbeResult>();
-        foreach (var p in probes.Distinct())
-            results.Add(PingTarget(p.target, p.kind, 5, 900));
+        var pingTasks = probes.Distinct()
+            .Select(p => Task.Run(() => PingTarget(p.target, p.kind, 5, 900)))
+            .ToArray();
+        var results = Task.WhenAll(pingTasks).GetAwaiter().GetResult().ToList();
 
         var sb = new StringBuilder();
         sb.AppendLine("Target\tKind\tResolvedAddress\tSent\tReceived\tLoss%\tMinMs\tAvgMs\tMaxMs\tError");
@@ -834,7 +836,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             string address = target;
             if (!IPAddress.TryParse(target, out _))
             {
-                var addrs = Dns.GetHostAddresses(target);
+                var addrs = ResolveHostWithTimeout(target, 4000);
                 result.ResolvedAddress = string.Join(",", addrs.Select(a => a.ToString()).Take(6));
                 var preferred = addrs.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) ?? addrs.FirstOrDefault();
                 if (preferred == null)
@@ -891,12 +893,10 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             "https://www.microsoft.com/"
         };
 
-        var results = new List<HttpProbeResult>();
-        foreach (bool useProxy in new[] { false, true })
-        {
-            foreach (string url in urls)
-                results.Add(HttpProbe(url, useProxy));
-        }
+        var tasks = (from useProxy in new[] { false, true }
+                     from url in urls
+                     select Task.Run(() => HttpProbe(url, useProxy))).ToArray();
+        var results = Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
 
         var sb = new StringBuilder();
         sb.AppendLine("Mode\tURL\tSuccess\tStatusCode\tDurationMs\tDetail");
@@ -942,6 +942,14 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             r.DurationMs = sw.ElapsedMilliseconds;
         }
         return r;
+    }
+
+    private static IPAddress[] ResolveHostWithTimeout(string host, int timeoutMs)
+    {
+        var task = Dns.GetHostAddressesAsync(host);
+        if (!task.Wait(timeoutMs))
+            throw new TimeoutException($"DNS resolution timed out after {timeoutMs} ms: {host}");
+        return task.GetAwaiter().GetResult();
     }
 
     private static int GetRecentIpConflictCount()
@@ -1097,7 +1105,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
         try
         {
-            Dns.GetHostAddresses("www.baidu.com");
+            ResolveHostWithTimeout("www.baidu.com", 4000);
         }
         catch
         {
