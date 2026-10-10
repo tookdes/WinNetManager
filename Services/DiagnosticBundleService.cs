@@ -300,7 +300,7 @@ $bios | Format-List * | Out-String -Width 4096
             ("01-system/hotfixes.txt", "收集最近 Windows 更新", """
 Get-HotFix -ErrorAction SilentlyContinue |
   Sort-Object InstalledOn -Descending |
-  Select-Object -First 40 HotFixID,Description,InstalledOn,InstalledBy |
+  Select-Object -First 40 HotFixID,Description,InstalledOn |
   Format-Table -AutoSize | Out-String -Width 4096
 """, 15000),
 
