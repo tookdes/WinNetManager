@@ -51,6 +51,7 @@ internal sealed class DiagnosticStepRecord
     public string Status { get; set; } = "OK";
     public int ExitCode { get; set; }
     public long DurationMs { get; set; }
+    public int? PowerShellErrorCount { get; set; }
     public string Error { get; set; } = "";
 }
 
@@ -1020,6 +1021,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             Status = status,
             ExitCode = exitCode,
             DurationMs = sw.ElapsedMilliseconds,
+            PowerShellErrorCount = psErrorCount,
             Error = error
         };
     }
@@ -2465,6 +2467,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                     r.Status,
                     r.ExitCode,
                     r.DurationMs,
+                    r.PowerShellErrorCount,
                     r.Error,
                     file_bytes = metrics.Bytes,
                     file_lines = metrics.Lines
