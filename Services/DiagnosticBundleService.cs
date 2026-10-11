@@ -21,6 +21,10 @@ public sealed class DiagnosticBundleOptions
 {
     public bool IncludePacketCapture { get; set; }
     public int PacketCaptureSeconds { get; set; } = 10;
+
+    // Optional user-reported failing destination. Reuses the Network Diagnostics target/port fields.
+    public string CustomTarget { get; set; } = "";
+    public int? CustomPort { get; set; }
 }
 
 public sealed class DiagnosticBundleResult
@@ -40,6 +44,7 @@ internal sealed class DiagnosticStepRecord
 {
     public string Name { get; set; } = "";
     public string File { get; set; } = "";
+    // OK / EMPTY / SKIP / WARN / FAIL
     public string Status { get; set; } = "OK";
     public int ExitCode { get; set; }
     public long DurationMs { get; set; }
@@ -155,7 +160,7 @@ public static class DiagnosticBundleService
                 progress?.Report(step.Name);
                 var record = RunPowerShellStep(workDir, step.File, step.Name, step.Script, step.TimeoutMs, cancellationToken);
                 records.Add(record);
-                if (record.Status != "OK") errorCount++;
+                if (IsStepError(record.Status)) errorCount++;
             }
 
             var nativeSteps = BuildNativeSteps();
@@ -165,14 +170,14 @@ public static class DiagnosticBundleService
                 progress?.Report(step.Name);
                 var record = RunNativeStep(workDir, step.File, step.Name, step.FileName, step.Arguments, step.TimeoutMs, cancellationToken);
                 records.Add(record);
-                if (record.Status != "OK") errorCount++;
+                if (IsStepError(record.Status)) errorCount++;
             }
 
             progress?.Report("导出 Windows Filtering Platform (WFP) 状态...");
             foreach (var record in CollectWfpSnapshot(workDir, cancellationToken))
             {
                 records.Add(record);
-                if (record.Status == "WARN") errorCount++;
+                if (IsStepError(record.Status)) errorCount++;
             }
 
             progress?.Report("采样网卡流量、丢包和错误计数（5 秒）...");
@@ -222,7 +227,7 @@ public static class DiagnosticBundleService
             foreach (var record in RunConditionalTraceroutes(workDir, pingResults, cancellationToken))
             {
                 records.Add(record);
-                if (record.Status == "WARN") errorCount++;
+                if (IsStepError(record.Status)) errorCount++;
             }
 
             progress?.Report("测试 HTTP / HTTPS（直连与系统代理路径）...");
@@ -259,7 +264,7 @@ public static class DiagnosticBundleService
                 progress?.Report($"附加 PktMon 抓包（{options.PacketCaptureSeconds} 秒）...");
                 var captureRecord = CapturePktMon(workDir, Math.Clamp(options.PacketCaptureSeconds, 5, 30), cancellationToken);
                 records.Add(captureRecord);
-                if (captureRecord.Status == "WARN") errorCount++;
+                if (IsStepError(captureRecord.Status)) errorCount++;
             }
 
             progress?.Report("生成 SUMMARY.md 与 manifest.json...");
@@ -883,12 +888,24 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     private static DiagnosticStepRecord RunPowerShellStep(
         string root, string relative, string name, string script, int timeoutMs, CancellationToken cancellationToken)
     {
-        var sw = Stopwatch.StartNew();
-        string output = ProcessRunner.RunPowerShell(script, out string error, out int exitCode, timeoutMs, cancellationToken);
-        sw.Stop();
-        string status = exitCode == 0 && string.IsNullOrWhiteSpace(error) ? "OK" : "WARN";
+        // PowerShell cmdlets often use -ErrorAction SilentlyContinue. Without instrumentation,
+        // a collector can fail and still exit 0 with an empty file. Record non-terminating errors
+        // separately so "nothing exists" is distinguishable from "we failed to collect it".
+        string instrumented =
+            "$Error.Clear();\n" +
+            script +
+            "\n$__wnmErrorCount = $Error.Count; Write-Output \"__WNM_ERROR_COUNT=$__wnmErrorCount\"";
 
-        WriteCommandResult(root, relative, name, "PowerShell", output, error, exitCode, sw.Elapsed);
+        var sw = Stopwatch.StartNew();
+        string output = ProcessRunner.RunPowerShell(
+            instrumented, out string error, out int exitCode, timeoutMs, cancellationToken);
+        sw.Stop();
+
+        int psErrorCount = ExtractPowerShellErrorCount(ref output);
+        string status = ClassifyStep(exitCode, error, output, psErrorCount);
+
+        WriteCommandResult(root, relative, name, "PowerShell", output, error, exitCode, sw.Elapsed,
+            extraHeader: $"PowerShellErrorCount: {psErrorCount}");
         return new DiagnosticStepRecord
         {
             Name = name,
@@ -906,7 +923,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var sw = Stopwatch.StartNew();
         string output = ProcessRunner.RunNative(fileName, arguments, out string error, out int exitCode, timeoutMs, cancellationToken);
         sw.Stop();
-        string status = exitCode == 0 && string.IsNullOrWhiteSpace(error) ? "OK" : "WARN";
+        string status = ClassifyStep(exitCode, error, output);
 
         WriteCommandResult(root, relative, name, $"{fileName} {arguments}", output, error, exitCode, sw.Elapsed);
         return new DiagnosticStepRecord
@@ -1052,7 +1069,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     }
 
     private static void WriteCommandResult(
-        string root, string relative, string title, string command, string output, string error, int exitCode, TimeSpan duration)
+        string root, string relative, string title, string command, string output, string error, int exitCode, TimeSpan duration,
+        string? extraHeader = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# {title}");
@@ -1060,6 +1078,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine($"# Command: {command}");
         sb.AppendLine($"# ExitCode: {exitCode}");
         sb.AppendLine($"# Duration: {duration.TotalSeconds:F2}s");
+        if (!string.IsNullOrWhiteSpace(extraHeader))
+            sb.AppendLine($"# {extraHeader}");
         sb.AppendLine();
         if (!string.IsNullOrWhiteSpace(output))
             sb.AppendLine(output.TrimEnd());
@@ -1070,6 +1090,44 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             sb.AppendLine(error.TrimEnd());
         }
         WriteText(root, relative, sb.ToString());
+    }
+
+    private static bool IsStepError(string status)
+        => status is "WARN" or "FAIL";
+
+    private static string ClassifyStep(
+        int exitCode,
+        string error,
+        string output,
+        int powerShellErrorCount = 0)
+    {
+        if (exitCode != 0)
+            return "FAIL";
+        if (!string.IsNullOrWhiteSpace(error) || powerShellErrorCount > 0)
+            return "WARN";
+        return string.IsNullOrWhiteSpace(output) ? "EMPTY" : "OK";
+    }
+
+    private static int ExtractPowerShellErrorCount(ref string output)
+    {
+        const string prefix = "__WNM_ERROR_COUNT=";
+        int count = 0;
+        var kept = new List<string>();
+
+        foreach (string line in (output ?? "").Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+        {
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith(prefix, StringComparison.Ordinal) &&
+                int.TryParse(trimmed[prefix.Length..], out int parsed))
+            {
+                count = parsed;
+                continue;
+            }
+            kept.Add(line);
+        }
+
+        output = string.Join(Environment.NewLine, kept).TrimEnd();
+        return count;
     }
 
     private static void WriteHealthSnapshot(string root, List<NetworkHealthItem> items)
