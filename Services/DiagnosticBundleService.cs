@@ -1960,14 +1960,14 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     {
         var subsystem = records.FirstOrDefault(r =>
             string.Equals(r.File, "00-summary/subsystem-health.txt", StringComparison.OrdinalIgnoreCase));
-        if (subsystem?.Status == "WARN")
+        if (subsystem != null && IsStepError(subsystem.Status))
         {
             findings.Add("[警告] 诊断依赖的 Winmgmt/EventLog/BFE 或核心 Get-Net* cmdlet 存在异常；部分 PowerShell/CIM/WFP/事件采集可能不完整，请优先查看 00-summary/subsystem-health.txt，并以 ipconfig/route/netsh/netstat 等原生命令文件交叉验证。");
             warningCount++;
         }
 
         int psWarnings = records.Count(r =>
-            r.Status == "WARN" &&
+            IsStepError(r.Status) &&
             (r.File.StartsWith("02-adapters/", StringComparison.OrdinalIgnoreCase) ||
              r.File.StartsWith("03-routing/", StringComparison.OrdinalIgnoreCase) ||
              r.File.StartsWith("09-connections/", StringComparison.OrdinalIgnoreCase) ||
