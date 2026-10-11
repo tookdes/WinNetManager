@@ -1969,14 +1969,33 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     {
         var manifest = new
         {
-            schema = 1,
+            schema = 2,
             generated_at = started,
+            completed_at = DateTimeOffset.Now,
+            total_duration_ms = (long)(DateTimeOffset.Now - started).TotalMilliseconds,
             computer_name = Environment.MachineName,
+            os_version = Environment.OSVersion.VersionString,
             app_version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
             elevated = IsAdministrator(),
             packet_capture = options.IncludePacketCapture,
             packet_capture_seconds = options.PacketCaptureSeconds,
-            steps = records
+            custom_target = string.IsNullOrWhiteSpace(options.CustomTarget) ? null : options.CustomTarget,
+            custom_port = options.CustomPort,
+            steps = records.Select(r =>
+            {
+                var metrics = GetArtifactMetrics(root, r.File);
+                return new
+                {
+                    r.Name,
+                    r.File,
+                    r.Status,
+                    r.ExitCode,
+                    r.DurationMs,
+                    r.Error,
+                    file_bytes = metrics.Bytes,
+                    file_lines = metrics.Lines
+                };
+            }).ToList()
         };
 
         WriteText(root, "manifest.json", JsonSerializer.Serialize(manifest, new JsonSerializerOptions
@@ -2013,6 +2032,37 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("隐私：包内可能出现 IP、MAC、SSID/BSSID、代理/VPN 服务器、进程名、应用路径、SID、活动连接和网络事件。");
         sb.AppendLine("WFP XML 与事件日志可能包含本机应用路径或安全主体信息。PktMon 的 128 字节截断仍可能包含 DNS 查询名、TLS SNI、HTTP 请求头片段、端口和 IP/MAC。不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码、文档内容或环境变量；DNS Cache 默认不采集。");
         WriteText(root, "README.txt", sb.ToString());
+    }
+
+    private static (long? Bytes, long? Lines) GetArtifactMetrics(string root, string relative)
+    {
+        try
+        {
+            string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(path))
+                return (null, null);
+
+            long bytes = new FileInfo(path).Length;
+            string ext = Path.GetExtension(path);
+            bool textLike = ext.Equals(".txt", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".csv", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".tsv", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".json", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".md", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".xml", StringComparison.OrdinalIgnoreCase);
+            if (!textLike)
+                return (bytes, null);
+
+            long lines = 0;
+            using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            while (reader.ReadLine() != null)
+                lines++;
+            return (bytes, lines);
+        }
+        catch
+        {
+            return (null, null);
+        }
     }
 
     private static void PreflightDiskSpace(string workDir, string zipPath, bool includesCapture)
