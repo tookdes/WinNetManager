@@ -1135,6 +1135,20 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         WriteText(root, relative, sb.ToString());
     }
 
+    internal static bool IsGlobalUnicastIpv6(IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetworkV6 ||
+            IPAddress.IsLoopback(address) ||
+            address.IsIPv6LinkLocal ||
+            address.IsIPv6Multicast)
+            return false;
+
+        // RFC 4291 global-unicast space is 2000::/3.
+        // This deliberately excludes ULA fc00::/7 and obsolete site-local ranges.
+        byte[] bytes = address.GetAddressBytes();
+        return bytes.Length == 16 && (bytes[0] & 0xE0) == 0x20;
+    }
+
     private static bool IsStepError(string status)
         => status is "WARN" or "FAIL";
 
@@ -1288,10 +1302,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 try
                 {
                     return n.GetIPProperties().UnicastAddresses.Any(a =>
-                        a.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
-                        !a.Address.IsIPv6LinkLocal &&
-                        !a.Address.IsIPv6SiteLocal &&
-                        !IPAddress.IsLoopback(a.Address));
+                        IsGlobalUnicastIpv6(a.Address));
                 }
                 catch { return false; }
             });
@@ -1719,10 +1730,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                     !g.Address.Equals(IPAddress.Any));
 
                 anyGlobalIpv6 |= props.UnicastAddresses.Any(a =>
-                    a.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
-                    !a.Address.IsIPv6LinkLocal &&
-                    !a.Address.IsIPv6SiteLocal &&
-                    !IPAddress.IsLoopback(a.Address));
+                    IsGlobalUnicastIpv6(a.Address));
                 anyIpv6Gateway |= props.GatewayAddresses.Any(g =>
                     g.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
                     !g.Address.Equals(IPAddress.IPv6Any));
