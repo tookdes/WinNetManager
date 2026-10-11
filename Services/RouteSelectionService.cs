@@ -150,19 +150,29 @@ internal static class RouteSelectionService
         out string error)
     {
         error = "";
-        var row = new MibIpinterfaceRow
+        try
         {
-            Family = family,
-            InterfaceIndex = interfaceIndex,
-            ZoneIndices = new uint[ScopeLevelCount]
-        };
+            var row = new MibIpinterfaceRow
+            {
+                Family = family,
+                InterfaceIndex = interfaceIndex,
+                ZoneIndices = new uint[ScopeLevelCount]
+            };
 
-        uint code = GetIpInterfaceEntry(ref row);
-        if (code == 0)
-            return row.Metric;
+            uint code = GetIpInterfaceEntry(ref row);
+            if (code == 0)
+                return row.Metric;
 
-        error = $"GetIpInterfaceEntry failed: {code} ({new Win32Exception(unchecked((int)code)).Message})";
-        return null;
+            error = $"GetIpInterfaceEntry failed: {code} ({new Win32Exception(unchecked((int)code)).Message})";
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Interface metric is supplemental evidence. A marshalling/API failure here
+            // must not discard the already-valid route/source/interface decision.
+            error = $"GetIpInterfaceEntry unavailable: {ex.GetBaseException().Message}";
+            return null;
+        }
     }
 
     private static bool IsUnspecified(IPAddress? address)
