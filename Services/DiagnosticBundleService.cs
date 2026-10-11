@@ -1173,7 +1173,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             sw.Stop();
 
             bool hasFile = File.Exists(path) && new FileInfo(path).Length > 0;
-            string status = exitCode == 0 && hasFile ? "OK" : "WARN";
+            string status = exitCode != 0 ? "FAIL" : hasFile ? "OK" : "WARN";
             string control = $"Command: netsh {args}\r\nExitCode: {exitCode}\r\nDuration: {sw.Elapsed.TotalSeconds:F2}s\r\n" +
                              $"Output file: {path}\r\nExists: {hasFile}\r\n\r\n{output}\r\n{error}";
             WriteText(root, job.Relative + ".log.txt", control);
@@ -2228,6 +2228,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         string pcapng = Path.Combine(dir, "pktmon.pcapng");
         var sw = Stopwatch.StartNew();
         var log = new StringBuilder();
+        var captureWarnings = new List<string>();
 
         // Record pre-existing state. We intentionally do not call "pktmon stop" here:
         // another administrator may already be using an active capture.
@@ -2242,6 +2243,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             filterError,
             filterCode,
             TimeSpan.Zero);
+        if (filterCode != 0)
+            captureWarnings.Add("无法读取 PktMon 现有过滤器状态。");
 
         string statusOutput = ProcessRunner.RunNative(
             pktmonExe, "status", out string statusError, out int statusCode, 10000, cancellationToken);
@@ -2279,6 +2282,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         string resetOutput = ProcessRunner.RunNative(
             pktmonExe, "reset", out string resetError, out int resetCode, 10000, cancellationToken);
         bool countersReset = resetCode == 0;
+        if (!countersReset)
+            captureWarnings.Add("PktMon counters reset 失败，drop counters 可能包含抓包前累计值。");
         log.AppendLine("=== pktmon reset ===");
         log.AppendLine(resetOutput);
         log.AppendLine(resetError);
@@ -2311,6 +2316,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 countersText.AppendLine(countersError.TrimEnd());
             }
             WriteText(root, "11-packet-capture/pktmon-drop-counters-window.json.txt", countersText.ToString());
+            if (countersCode != 0)
+                captureWarnings.Add("PktMon drop counters 查询失败。");
         }
         finally
         {
@@ -2320,6 +2327,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             log.AppendLine(stopOutput);
             log.AppendLine(stopError);
             log.AppendLine($"stop exit={stopCode}");
+            if (stopCode != 0)
+                captureWarnings.Add("PktMon stop 返回失败，ETL 可能不完整。");
         }
 
         if (File.Exists(etl))
@@ -2330,6 +2339,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             log.AppendLine(conv);
             log.AppendLine(convErr);
             log.AppendLine($"exit={convCode}");
+            if (convCode != 0)
+                captureWarnings.Add("PktMon etl2txt 转换失败。");
 
             string pcapArgs = $"etl2pcap \"{etl}\" --out \"{pcapng}\"";
             string pcap = ProcessRunner.RunNative(pktmonExe, pcapArgs, out string pcapErr, out int pcapCode, 30000, cancellationToken);
@@ -2337,18 +2348,23 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             log.AppendLine(pcap);
             log.AppendLine(pcapErr);
             log.AppendLine($"exit={pcapCode}");
+            if (pcapCode != 0)
+                captureWarnings.Add("PktMon etl2pcap 转换失败；ETL 原始文件仍保留。");
         }
 
         sw.Stop();
         WriteText(root, "11-packet-capture/pktmon-control.txt", log.ToString());
+        bool etlExists = File.Exists(etl);
         return new DiagnosticStepRecord
         {
             Name = "PktMon 抓包",
             File = "11-packet-capture/pktmon.etl",
-            Status = File.Exists(etl) ? "OK" : "WARN",
-            ExitCode = File.Exists(etl) ? 0 : 1,
+            Status = !etlExists ? "WARN" : captureWarnings.Count > 0 ? "WARN" : "OK",
+            ExitCode = etlExists ? 0 : 1,
             DurationMs = sw.ElapsedMilliseconds,
-            Error = File.Exists(etl) ? "" : "PktMon 未生成 ETL 文件"
+            Error = !etlExists
+                ? "PktMon 未生成 ETL 文件"
+                : string.Join(" ", captureWarnings)
         };
     }
 
