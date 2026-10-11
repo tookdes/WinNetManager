@@ -9,6 +9,7 @@ using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -393,6 +394,33 @@ Get-NetNeighbor -IncludeAllCompartments -ErrorAction SilentlyContinue |
   Format-Table -AutoSize | Out-String -Width 4096
 """, 20000),
 
+            ("02-adapters/dhcp-registry.txt", "收集 DHCP 租约与接口注册表状态", """
+$base = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces'
+Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object {
+  $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+  $leaseObtained = if ($p.LeaseObtainedTime) {
+    try { [DateTimeOffset]::FromUnixTimeSeconds([int64]$p.LeaseObtainedTime).LocalDateTime } catch { $null }
+  } else { $null }
+  $leaseEnds = if ($p.LeaseTerminatesTime) {
+    try { [DateTimeOffset]::FromUnixTimeSeconds([int64]$p.LeaseTerminatesTime).LocalDateTime } catch { $null }
+  } else { $null }
+  [pscustomobject]@{
+    InterfaceGuid = $_.PSChildName
+    EnableDHCP = $p.EnableDHCP
+    DhcpIPAddress = $p.DhcpIPAddress
+    DhcpSubnetMask = $p.DhcpSubnetMask
+    DhcpDefaultGateway = ($p.DhcpDefaultGateway -join ',')
+    DhcpServer = $p.DhcpServer
+    DhcpNameServer = $p.DhcpNameServer
+    DhcpDomain = $p.DhcpDomain
+    LeaseObtainedTime = $p.LeaseObtainedTime
+    LeaseObtainedLocal = $leaseObtained
+    LeaseTerminatesTime = $p.LeaseTerminatesTime
+    LeaseTerminatesLocal = $leaseEnds
+  }
+} | Format-List * | Out-String -Width 4096
+""", 15000),
+
             ("04-dns/dns-client.txt", "收集 DNS 服务器、后缀和客户端设置", """
 "=== DNS servers ==="
 Get-DnsClientServerAddress -ErrorAction SilentlyContinue |
@@ -465,16 +493,6 @@ Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\NlaSvc\Parameters\Inte
   Format-List * | Out-String -Width 4096
 """, 10000),
 
-            ("05-connectivity/traceroute-223.5.5.5.txt", "Traceroute 到阿里 DNS 223.5.5.5", """
-Test-NetConnection -ComputerName '223.5.5.5' -TraceRoute -WarningAction SilentlyContinue |
-  Format-List * | Out-String -Width 4096
-""", 45000),
-
-            ("05-connectivity/traceroute-1.1.1.1.txt", "Traceroute 到 1.1.1.1", """
-Test-NetConnection -ComputerName '1.1.1.1' -TraceRoute -WarningAction SilentlyContinue |
-  Format-List * | Out-String -Width 4096
-""", 45000),
-
             ("03-routing/nat-compartments.txt", "收集 NAT 与网络隔离 compartment", """
 "=== NetNat ==="
 Get-NetNat -ErrorAction SilentlyContinue | Format-List * | Out-String -Width 4096
@@ -525,6 +543,15 @@ foreach ($r in $rules) {
 }
 """, 30000),
 
+            ("06-proxy-vpn/network-provider-order.txt", "收集 Network Provider 顺序", """
+"=== Provider Order ==="
+Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\NetworkProvider\Order' -ErrorAction SilentlyContinue |
+  Select-Object ProviderOrder | Format-List * | Out-String -Width 4096
+"=== Hardware Provider Order ==="
+Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\NetworkProvider\HWOrder' -ErrorAction SilentlyContinue |
+  Select-Object ProviderOrder | Format-List * | Out-String -Width 4096
+""", 10000),
+
             ("08-services/services.txt", "收集关键网络服务", """
 $names = @('Dhcp','Dnscache','NlaSvc','netprofm','WlanSvc','iphlpsvc','WinHttpAutoProxySvc',
            'BFE','MpsSvc','PolicyAgent','IKEEXT','RemoteAccess','RasMan','lmhosts','SharedAccess')
@@ -544,6 +571,29 @@ Get-CimInstance Win32_SystemDriver -ErrorAction SilentlyContinue |
   Select-Object Name,DisplayName,State,StartMode,PathName |
   Sort-Object Name |
   Format-Table -AutoSize | Out-String -Width 4096
+""", 20000),
+
+            ("09-connections/tcp-state-summary.txt", "统计 TCP 状态与高端口占用", """
+$c = Get-NetTCPConnection -ErrorAction SilentlyContinue
+"=== State counts ==="
+$c | Group-Object State | Sort-Object Count -Descending |
+  Select-Object Name,Count | Format-Table -AutoSize | Out-String -Width 4096
+"=== High local ports (>=49152) ==="
+$high = $c | Where-Object { $_.LocalPort -ge 49152 }
+[pscustomobject]@{
+  Connections = @($high).Count
+  UniqueLocalPorts = @($high.LocalPort | Sort-Object -Unique).Count
+  TimeWait = @($c | Where-Object State -eq 'TimeWait').Count
+  CloseWait = @($c | Where-Object State -eq 'CloseWait').Count
+  SynSent = @($c | Where-Object State -eq 'SynSent').Count
+} | Format-List * | Out-String -Width 4096
+"=== Top owning processes ==="
+$c | Group-Object OwningProcess | Sort-Object Count -Descending | Select-Object -First 30 |
+  ForEach-Object {
+    $pid = [int]$_.Name
+    $name = try { (Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch { '' }
+    [pscustomobject]@{ PID=$pid; ProcessName=$name; Connections=$_.Count }
+  } | Format-Table -AutoSize | Out-String -Width 4096
 """, 20000),
 
             ("09-connections/tcp-connections.csv", "收集全部 TCP 连接", """
@@ -570,6 +620,32 @@ Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start} -MaxEvents 50
   Select-Object -First 1200 TimeCreated,Id,LevelDisplayName,ProviderName,Message |
   Format-List * | Out-String -Width 4096
 """, 30000),
+
+            ("10-events/dhcp-client-events-48h.txt", "收集最近 48 小时 DHCP Client 事件", """
+$start = (Get-Date).AddHours(-48)
+$logs = Get-WinEvent -ListLog '*Dhcp*' -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.LogName -match 'Dhcp-Client' -or
+    $_.LogName -match 'DHCP Client Events'
+  }
+"=== Available DHCP client logs ==="
+$logs | Select-Object LogName,IsEnabled,RecordCount,LastWriteTime |
+  Format-Table -AutoSize | Out-String -Width 4096
+foreach ($log in $logs) {
+  "===== $($log.LogName) ====="
+  if (-not $log.IsEnabled) {
+    "Log is disabled."
+    continue
+  }
+  try {
+    Get-WinEvent -FilterHashtable @{LogName=$log.LogName;StartTime=$start} -MaxEvents 800 -ErrorAction Stop |
+      Select-Object TimeCreated,Id,LevelDisplayName,ProviderName,Message |
+      Format-List * | Out-String -Width 4096
+  } catch {
+    "ERROR: $($_.Exception.Message)"
+  }
+}
+""", 25000),
 
             ("10-events/dns-client-events-48h.txt", "收集最近 48 小时 DNS Client 事件", """
 $start = (Get-Date).AddHours(-48)
@@ -611,8 +687,17 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             ("02-adapters/teredo-state.txt", "收集 Teredo 状态", "netsh.exe", "interface teredo show state", 10000),
             ("06-proxy-vpn/winhttp-proxy.txt", "收集 WinHTTP 代理", "netsh.exe", "winhttp show proxy", 10000),
             ("06-proxy-vpn/portproxy.txt", "收集 portproxy 转发规则", "netsh.exe", "interface portproxy show all", 10000),
+            ("09-connections/dynamic-ports-ipv4-tcp.txt", "收集 IPv4 TCP 动态端口范围", "netsh.exe", "interface ipv4 show dynamicportrange protocol=tcp", 10000),
+            ("09-connections/dynamic-ports-ipv4-udp.txt", "收集 IPv4 UDP 动态端口范围", "netsh.exe", "interface ipv4 show dynamicportrange protocol=udp", 10000),
+            ("09-connections/dynamic-ports-ipv6-tcp.txt", "收集 IPv6 TCP 动态端口范围", "netsh.exe", "interface ipv6 show dynamicportrange protocol=tcp", 10000),
+            ("09-connections/dynamic-ports-ipv6-udp.txt", "收集 IPv6 UDP 动态端口范围", "netsh.exe", "interface ipv6 show dynamicportrange protocol=udp", 10000),
+            ("09-connections/excluded-ports-ipv4-tcp.txt", "收集 IPv4 TCP 排除端口范围", "netsh.exe", "interface ipv4 show excludedportrange protocol=tcp", 10000),
+            ("09-connections/excluded-ports-ipv4-udp.txt", "收集 IPv4 UDP 排除端口范围", "netsh.exe", "interface ipv4 show excludedportrange protocol=udp", 10000),
+            ("09-connections/excluded-ports-ipv6-tcp.txt", "收集 IPv6 TCP 排除端口范围", "netsh.exe", "interface ipv6 show excludedportrange protocol=tcp", 10000),
+            ("09-connections/excluded-ports-ipv6-udp.txt", "收集 IPv6 UDP 排除端口范围", "netsh.exe", "interface ipv6 show excludedportrange protocol=udp", 10000),
+            ("02-adapters/dhcp-client-trace-dump.txt", "导出 DHCP Client 最近跟踪记录", "netsh.exe", "dhcpclient trace dump", 15000),
             ("08-services/winsock-catalog.txt", "收集 Winsock Catalog", "netsh.exe", "winsock show catalog", 20000),
-            ("08-services/driverquery.csv", "导出驱动列表", "driverquery.exe", "/FO CSV /V /SVC", 25000),
+            ("08-services/driverquery.csv", "导出驱动列表", "driverquery.exe", "/FO CSV /SVC", 15000),
             ("09-connections/netstat-ano.txt", "运行 netstat -ano", "netstat.exe", "-ano", 20000),
             ("01-system/time-sync.txt", "检查 Windows 时间同步", "w32tm.exe", "/query /status", 10000)
         };
@@ -699,7 +784,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
             try
             {
-                var s = ni.GetIPv4Statistics();
+                var s = ni.GetIPStatistics();
                 result.Add(new TrafficSnapshot
                 {
                     Id = ni.Id,
@@ -1251,7 +1336,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         foreach (var r in records)
             sb.AppendLine($"| {r.Status} | {Md(r.Name)} | {Md(r.File)} | {r.DurationMs / 1000.0:F1}s |");
         sb.AppendLine();
-        sb.AppendLine("> 诊断包可能包含 IP/MAC、SSID/BSSID、DNS/代理/VPN 地址、活动连接和网络事件。发送给第三方前请确认接收方可信。不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码或文件内容；DNS 缓存也默认不采集。");
+        sb.AppendLine("> 诊断包可能包含 IP/MAC、SSID/BSSID、DNS/代理/VPN 地址、活动连接、应用路径、SID、WFP 配置和网络事件。发送给第三方前请确认接收方可信。不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码或文件内容；DNS 缓存也默认不采集。");
 
         WriteText(root, "SUMMARY.md", sb.ToString());
     }
@@ -1295,17 +1380,17 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("- DNS、NRPT、Hosts、系统解析与逐 DNS 服务器解析测试");
         sb.AppendLine("- 网关/公共 IPv4/IPv6/常用域名 Ping 与丢包");
         sb.AppendLine("- HTTP/HTTPS 直连与系统代理路径");
-        sb.AppendLine("- Traceroute、连接表、监听端点");
-        sb.AppendLine("- WinINET/PAC、VPN、网络接管软件、Winsock/WFP/驱动线索");
+        sb.AppendLine("- 条件化并发 Traceroute、TCP 动态/排除端口范围、连接表、监听端点");
+        sb.AppendLine("- WinINET/PAC、VPN、网络接管软件、Winsock、完整 WFP state/filters、驱动线索");
         sb.AppendLine("- 防火墙配置与启用规则");
-        sb.AppendLine("- 最近 48 小时网络、DHCP、DNS、IP 冲突事件");
+        sb.AppendLine("- DHCP 租约注册表、DHCP trace、最近 48 小时 DHCP/DNS/WLAN/网络/IP 冲突事件");
         sb.AppendLine("- 5 秒网卡流量/错误/丢弃/非单播采样，用于发现拥塞或疑似广播风暴");
         sb.AppendLine(options.IncludePacketCapture
             ? $"- 额外包含 {options.PacketCaptureSeconds} 秒 PktMon 抓包（128 字节截断）。"
             : "- 未包含抓包；如需要分析广播/ARP/异常流量，可在生成时勾选 PktMon。");
         sb.AppendLine();
-        sb.AppendLine("隐私：包内可能出现 IP、MAC、SSID/BSSID、代理/VPN 服务器、进程名和活动连接。");
-        sb.AppendLine("不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码、文档内容或环境变量；DNS Cache 默认不采集。");
+        sb.AppendLine("隐私：包内可能出现 IP、MAC、SSID/BSSID、代理/VPN 服务器、进程名、应用路径、SID、活动连接和网络事件。");
+        sb.AppendLine("WFP XML 与事件日志可能包含本机应用路径或安全主体信息。不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码、文档内容或环境变量；DNS Cache 默认不采集。");
         WriteText(root, "README.txt", sb.ToString());
     }
 
