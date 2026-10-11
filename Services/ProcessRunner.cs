@@ -1,34 +1,57 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Xml;
+using System.Runtime.InteropServices;
 
 namespace WinNetManager.Services;
 
 public static class ProcessRunner
 {
+    static ProcessRunner()
+    {
+        // Register legacy Windows code pages once for native console tools.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetOEMCP();
+
+    private static Encoding GetNativeConsoleEncoding()
+    {
+        try
+        {
+            uint codePage = GetOEMCP();
+            if (codePage != 0)
+                return Encoding.GetEncoding((int)codePage);
+        }
+        catch { }
+
+        try { return Console.OutputEncoding; }
+        catch { return Encoding.UTF8; }
+    }
     /// <summary>
     /// Runs an external process, reading stdout/stderr asynchronously to avoid deadlocks.
     /// Kills the process if it exceeds the timeout.
     /// </summary>
-    public static string Run(string fileName, string arguments, out string error, int timeoutMs = 30000)
+    public static string Run(string fileName, string arguments, out string error, int timeoutMs = 30000, CancellationToken cancellationToken = default)
     {
-        return Run(fileName, arguments, out error, out _, timeoutMs);
+        return Run(fileName, arguments, out error, out _, timeoutMs, cancellationToken);
     }
 
-    public static string Run(string fileName, IEnumerable<string> arguments, out string error, int timeoutMs = 30000)
+    public static string Run(string fileName, IEnumerable<string> arguments, out string error, int timeoutMs = 30000, CancellationToken cancellationToken = default)
     {
-        return Run(fileName, arguments, out error, out _, timeoutMs);
+        return Run(fileName, arguments, out error, out _, timeoutMs, cancellationToken);
     }
 
     /// <summary>
     /// Runs an external process, reading stdout/stderr asynchronously to avoid deadlocks.
     /// Kills the process if it exceeds the timeout. Returns the process exit code.
     /// </summary>
-    public static string Run(string fileName, string arguments, out string error, out int exitCode, int timeoutMs = 30000)
+    public static string Run(string fileName, string arguments, out string error, out int exitCode, int timeoutMs = 30000, CancellationToken cancellationToken = default)
     {
         var psi = new ProcessStartInfo
         {
@@ -42,10 +65,10 @@ public static class ProcessRunner
             CreateNoWindow = true,
         };
 
-        return Run(psi, out error, out exitCode, timeoutMs);
+        return Run(psi, out error, out exitCode, timeoutMs, cancellationToken);
     }
 
-    public static string Run(string fileName, IEnumerable<string> arguments, out string error, out int exitCode, int timeoutMs = 30000)
+    public static string Run(string fileName, IEnumerable<string> arguments, out string error, out int exitCode, int timeoutMs = 30000, CancellationToken cancellationToken = default)
     {
         var psi = new ProcessStartInfo
         {
@@ -61,27 +84,20 @@ public static class ProcessRunner
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
 
-        return Run(psi, out error, out exitCode, timeoutMs);
+        return Run(psi, out error, out exitCode, timeoutMs, cancellationToken);
     }
 
     /// <summary>
-    /// Runs a native Windows console tool using the installed UI culture's OEM code page.
-    /// This avoids mojibake from tools such as ipconfig/netsh/route/driverquery on non-English Windows.
-    /// Falls back to Console.OutputEncoding if the legacy code page is unavailable.
+    /// Runs a native Windows console tool using the OS OEM code page reported by GetOEMCP().
+    /// This matches the actual code page used by legacy tools such as ipconfig/netsh/route,
+    /// even when Windows display language differs from the system locale.
     /// </summary>
-    public static string RunNative(string fileName, string arguments, out string error, int timeoutMs = 30000)
-        => RunNative(fileName, arguments, out error, out _, timeoutMs);
+    public static string RunNative(string fileName, string arguments, out string error, int timeoutMs = 30000, CancellationToken cancellationToken = default)
+        => RunNative(fileName, arguments, out error, out _, timeoutMs, cancellationToken);
 
-    public static string RunNative(string fileName, string arguments, out string error, out int exitCode, int timeoutMs = 30000)
+    public static string RunNative(string fileName, string arguments, out string error, out int exitCode, int timeoutMs = 30000, CancellationToken cancellationToken = default)
     {
-        Encoding encoding = Console.OutputEncoding;
-        try
-        {
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            int codePage = CultureInfo.InstalledUICulture.TextInfo.OEMCodePage;
-            encoding = Encoding.GetEncoding(codePage);
-        }
-        catch { }
+        Encoding encoding = GetNativeConsoleEncoding();
 
         var psi = new ProcessStartInfo
         {
@@ -95,10 +111,10 @@ public static class ProcessRunner
             CreateNoWindow = true,
         };
 
-        return Run(psi, out error, out exitCode, timeoutMs);
+        return Run(psi, out error, out exitCode, timeoutMs, cancellationToken);
     }
 
-    private static string Run(ProcessStartInfo psi, out string error, out int exitCode, int timeoutMs)
+    private static string Run(ProcessStartInfo psi, out string error, out int exitCode, int timeoutMs, CancellationToken cancellationToken)
     {
         error = "";
         exitCode = -1;
@@ -116,25 +132,37 @@ public static class ProcessRunner
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
 
-            bool exited = p.WaitForExit(timeoutMs);
-            if (!exited)
+            var waitSw = Stopwatch.StartNew();
+            while (!p.WaitForExit(200))
             {
-                try { p.Kill(entireProcessTree: true); p.WaitForExit(5000); } catch { }
-                exitCode = -2;
-                error = $"Process timed out after {timeoutMs} ms.";
-                string timeoutError = errorBuilder.ToString();
-                if (!string.IsNullOrWhiteSpace(timeoutError))
-                    error += Environment.NewLine + CleanCliXml(timeoutError).Trim();
-                return outputBuilder.ToString();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    try { p.Kill(entireProcessTree: true); p.WaitForExit(5000); } catch { }
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
+                if (waitSw.ElapsedMilliseconds >= timeoutMs)
+                {
+                    try { p.Kill(entireProcessTree: true); p.WaitForExit(5000); } catch { }
+                    exitCode = -2;
+                    error = $"Process timed out after {timeoutMs} ms.";
+                    string timeoutError = errorBuilder.ToString();
+                    if (!string.IsNullOrWhiteSpace(timeoutError))
+                        error += Environment.NewLine + CleanCliXml(timeoutError).Trim();
+                    return outputBuilder.ToString();
+                }
             }
-            else
-            {
-                p.WaitForExit(); // Ensure async stream reads complete
-            }
+
+            p.WaitForExit(); // Ensure async stream reads complete
+            cancellationToken.ThrowIfCancellationRequested();
 
             exitCode = p.ExitCode;
             error = CleanCliXml(errorBuilder.ToString());
             return outputBuilder.ToString();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -148,10 +176,10 @@ public static class ProcessRunner
     /// Uses -EncodedCommand to avoid shell quoting issues entirely.
     /// Kills the process if it exceeds the timeout.
     /// </summary>
-    public static string RunPowerShell(string script, out string error, int timeoutMs = 30000)
-        => RunPowerShell(script, out error, out _, timeoutMs);
+    public static string RunPowerShell(string script, out string error, int timeoutMs = 30000, CancellationToken cancellationToken = default)
+        => RunPowerShell(script, out error, out _, timeoutMs, cancellationToken);
 
-    public static string RunPowerShell(string script, out string error, out int exitCode, int timeoutMs = 30000)
+    public static string RunPowerShell(string script, out string error, out int exitCode, int timeoutMs = 30000, CancellationToken cancellationToken = default)
     {
         string wrapped =
             "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
@@ -162,7 +190,7 @@ public static class ProcessRunner
         byte[] bytes = Encoding.Unicode.GetBytes(wrapped);
         string encoded = Convert.ToBase64String(bytes);
         string args = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}";
-        return Run("powershell.exe", args, out error, out exitCode, timeoutMs);
+        return Run("powershell.exe", args, out error, out exitCode, timeoutMs, cancellationToken);
     }
 
     /// <summary>

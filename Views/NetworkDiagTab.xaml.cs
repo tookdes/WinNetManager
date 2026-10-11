@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 using System.Windows;
@@ -15,12 +16,22 @@ public partial class NetworkDiagTab : UserControl
 {
     private readonly ObservableCollection<TcpConnectionInfo> _connections = new();
     private readonly ObservableCollection<ListenerInfo> _listeners = new();
+    private CancellationTokenSource? _diagnosticCts;
+    private bool _diagnosticBusy;
 
     public NetworkDiagTab()
     {
         InitializeComponent();
         ConnectionGrid.ItemsSource = _connections;
         ListenerGrid.ItemsSource = _listeners;
+
+        if (!DiagnosticBundleService.IsElevated)
+        {
+            ChkPacketCapture.IsChecked = false;
+            ChkPacketCapture.IsEnabled = false;
+            ChkPacketCapture.ToolTip = "当前进程不是管理员权限，PktMon 抓包不可用。";
+        }
+
         Loaded += async (_, _) => await RefreshAllAsync();
     }
 
@@ -234,8 +245,41 @@ public partial class NetworkDiagTab : UserControl
         }
     }
 
+    private void SetDiagnosticBusy(bool busy)
+    {
+        _diagnosticBusy = busy;
+
+        BtnRefresh.IsEnabled = !busy;
+        BtnPortTest.IsEnabled = !busy;
+        BtnTracert.IsEnabled = !busy;
+        BtnPathping.IsEnabled = !busy;
+        BtnHealthScan.IsEnabled = !busy;
+        BtnDiagnosticBundle.IsEnabled = !busy;
+        TxtTarget.IsEnabled = !busy;
+        TxtPort.IsEnabled = !busy;
+
+        if (DiagnosticBundleService.IsElevated)
+            ChkPacketCapture.IsEnabled = !busy;
+
+        BtnCancelDiagnostic.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        BtnCancelDiagnostic.IsEnabled = busy;
+    }
+
+    private void BtnCancelDiagnostic_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_diagnosticBusy || _diagnosticCts == null)
+            return;
+
+        BtnCancelDiagnostic.IsEnabled = false;
+        SetStatus("正在取消深度诊断...");
+        _diagnosticCts.Cancel();
+    }
+
     private async void BtnDiagnosticBundle_Click(object sender, RoutedEventArgs e)
     {
+        if (_diagnosticBusy)
+            return;
+
         var owner = Window.GetWindow(this);
         string safeMachine = string.Concat(Environment.MachineName.Select(ch =>
             char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
@@ -257,7 +301,7 @@ public partial class NetworkDiagTab : UserControl
         {
             var confirm = MessageBox.Show(
                 "PktMon 将抓取约 10 秒网络数据（每包截取前 128 字节）。\n\n" +
-                "它有助于分析 ARP/广播风暴和异常流量，但可能包含敏感网络元数据。\n" +
+                "它有助于分析 ARP/广播风暴和异常流量，但截断内容仍可能包含 DNS 查询名、TLS SNI、HTTP 请求头片段、端口和 IP/MAC。\n" +
                 "确定要把抓包文件一起放进诊断包吗？",
                 "确认附带抓包",
                 MessageBoxButton.YesNo,
@@ -266,8 +310,9 @@ public partial class NetworkDiagTab : UserControl
                 includeCapture = false;
         }
 
-        BtnDiagnosticBundle.IsEnabled = false;
-        BtnRefresh.IsEnabled = false;
+        SetDiagnosticBusy(true);
+        using var cts = new CancellationTokenSource();
+        _diagnosticCts = cts;
         var progress = new Progress<string>(msg => SetStatus($"深度诊断：{msg}"));
 
         DiagnosticBundleResult result;
@@ -280,7 +325,8 @@ public partial class NetworkDiagTab : UserControl
                     IncludePacketCapture = includeCapture,
                     PacketCaptureSeconds = 10
                 },
-                progress));
+                progress,
+                cts.Token));
         }
         catch (Exception ex)
         {
@@ -294,11 +340,23 @@ public partial class NetworkDiagTab : UserControl
         }
         finally
         {
-            BtnDiagnosticBundle.IsEnabled = true;
-            BtnRefresh.IsEnabled = true;
+            _diagnosticCts = null;
+            SetDiagnosticBusy(false);
         }
 
-        if (result.Success)
+        if (result.Cancelled)
+        {
+            SetStatus("深度诊断已取消");
+            string partial = string.IsNullOrWhiteSpace(result.WorkingDirectory)
+                ? ""
+                : $"\n\n已完成的临时采集文件保留在：\n{result.WorkingDirectory}";
+            CopyableMessageBox.Show(
+                "已取消深度诊断。" + partial,
+                "深度诊断已取消",
+                MessageBoxImage.Information,
+                owner);
+        }
+        else if (result.Success)
         {
             SetStatus($"诊断包已生成：{result.FileCount} 个文件，耗时 {result.Duration.TotalSeconds:F0} 秒");
             CopyableMessageBox.Show(

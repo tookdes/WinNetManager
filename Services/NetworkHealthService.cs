@@ -956,19 +956,54 @@ public static class NetworkHealthService
                 var ipv4Addrs = props.UnicastAddresses
                     .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
                     .ToList();
+                var ipv6Global = props.UnicastAddresses
+                    .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+                                && !a.Address.IsIPv6LinkLocal
+                                && !a.Address.IsIPv6SiteLocal
+                                && !System.Net.IPAddress.IsLoopback(a.Address))
+                    .ToList();
 
                 if (ipv4Addrs.Count == 0)
                 {
-                    // 已连接但无 IPv4 地址 — DHCP 可能失败
-                    items.Add(new NetworkHealthItem
+                    if (ipv6Global.Count > 0)
                     {
-                        Category = "IP 配置",
-                        Name = $"{ni.Name} 无 IPv4 地址",
-                        Status = "未分配",
-                        Detail = "适配器已连接但没有 IPv4 地址，可能是 DHCP 服务器不可达或未配置静态 IP。",
-                        Risk = "Warn"
-                    });
-                    continue; // 无 IP 则后续检查无意义
+                        items.Add(new NetworkHealthItem
+                        {
+                            Category = "IP 配置",
+                            Name = $"{ni.Name} IPv6-only / IPv6-first",
+                            Status = $"无 IPv4；有 {ipv6Global.Count} 个全局 IPv6 地址",
+                            Detail = "适配器没有 IPv4，但存在可用的全局 IPv6 地址；这可能是正常的 IPv6-only / IPv6-first 网络，不应直接判定 DHCP 失败。",
+                            Risk = "Info"
+                        });
+
+                        var ipv6DnsOnly = props.DnsAddresses
+                            .Where(d => d.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+                                        && !d.IsIPv6LinkLocal)
+                            .ToList();
+                        if (ipv6DnsOnly.Count == 0)
+                        {
+                            items.Add(new NetworkHealthItem
+                            {
+                                Category = "IP 配置",
+                                Name = $"{ni.Name} IPv6 无 DNS",
+                                Status = $"有 {ipv6Global.Count} 个全局 IPv6 地址",
+                                Detail = "已分配全局 IPv6 地址但未配置 IPv6 DNS 服务器；若网络不提供 DNS64/IPv4 DNS 可达路径，域名解析可能受影响。",
+                                Risk = "Info"
+                            });
+                        }
+                    }
+                    else
+                    {
+                        items.Add(new NetworkHealthItem
+                        {
+                            Category = "IP 配置",
+                            Name = $"{ni.Name} 无可用 IP 地址",
+                            Status = "无 IPv4 / 全局 IPv6",
+                            Detail = "适配器已连接但没有 IPv4 或可用的全局 IPv6 地址，可能是 DHCP/RA、VLAN、认证或链路配置异常。",
+                            Risk = "Warn"
+                        });
+                    }
+                    continue;
                 }
 
                 foreach (var ipv4 in ipv4Addrs)
@@ -1055,11 +1090,6 @@ public static class NetworkHealthService
                 // --- IPv6 检查 ---
                 if (ni.Supports(System.Net.NetworkInformation.NetworkInterfaceComponent.IPv6))
                 {
-                    var ipv6Global = props.UnicastAddresses
-                        .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
-                                  && !a.Address.IsIPv6LinkLocal)
-                        .ToList();
-
                     var ipv6Dns = props.DnsAddresses
                         .Where(d => d.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
                                   && !d.IsIPv6LinkLocal)
@@ -1128,7 +1158,8 @@ public static class NetworkHealthService
     private static bool ServiceExists(string serviceName)
         => _serviceCache.ContainsKey(serviceName);
 
-    // 驱动加载状态缓存 — driverquery 只跑一次，避免每个 TUN/WinDivert 条目单独启动进程
+    // 驱动加载状态缓存 — Win32_SystemDriver 能直接给出驱动服务名与运行状态。
+    // driverquery 不支持 /SVC（/SVC 是 tasklist 参数），因此不要依赖本地化文本列去猜状态。
     private static HashSet<string> _loadedDrivers = new(StringComparer.OrdinalIgnoreCase);
 
     private static void InitDriverCache()
@@ -1136,20 +1167,18 @@ public static class NetworkHealthService
         _loadedDrivers.Clear();
         try
         {
-            string output = ProcessRunner.RunNative("driverquery.exe", "/FO CSV /SVC", out _, 8000);
+            string output = ProcessRunner.RunPowerShell(
+                "Get-CimInstance Win32_SystemDriver -ErrorAction SilentlyContinue | " +
+                "Where-Object { $_.State -eq 'Running' } | " +
+                "Select-Object Name | ConvertTo-Csv -NoTypeInformation",
+                out _, 10000);
+
             var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var line in lines)
+            for (int i = 1; i < lines.Length; i++)
             {
-                if (!line.StartsWith("\"")) continue;
-                var parts = CsvParser.ParseLine(line);
-                if (parts.Length >= 4)
-                {
-                    string svcName = parts[3].Trim();
-                    string state = parts[2].Trim();
-                    if (state.Contains("Running", StringComparison.OrdinalIgnoreCase) ||
-                        state.Contains("正在运行", StringComparison.OrdinalIgnoreCase))
-                        _loadedDrivers.Add(svcName);
-                }
+                var parts = CsvParser.ParseLine(lines[i]);
+                if (parts.Length > 0 && !string.IsNullOrWhiteSpace(parts[0]))
+                    _loadedDrivers.Add(parts[0].Trim());
             }
         }
         catch { }
@@ -1178,9 +1207,8 @@ public static class NetworkHealthService
     }
 
     /// <summary>
-    /// 通过 driverquery /SVC 精确确认驱动是否在内核中加载（从缓存查询）。
-    /// /SVC 格式：显示名   类型   状态   服务名（最后一列是精确的驱动服务名）。
-    /// 必须精确匹配最后一列，避免子串误报。
+    /// 通过 Win32_SystemDriver 的 Running 状态确认驱动是否已加载（从缓存查询）。
+    /// 使用驱动服务名精确匹配，避免显示名/文件名子串造成误报。
     /// </summary>
     private static bool IsDriverLoaded(string serviceName)
         => _loadedDrivers.Contains(serviceName);

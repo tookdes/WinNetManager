@@ -5,19 +5,21 @@
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
             <Button Content="刷新" x:Name="BtnRefresh" Padding="12,4" Click="BtnRefresh_Click"/>
             <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
-            <Button Content="端口测试" Padding="12,4" Margin="6,0,0,0" Click="BtnPortTest_Click"/>
-            <Button Content="Tracert" Padding="12,4" Margin="6,0,0,0" Click="BtnTracert_Click"/>
-            <Button Content="Pathping" Padding="12,4" Margin="6,0,0,0" Click="BtnPathping_Click"/>
+            <Button x:Name="BtnPortTest" Content="端口测试" Padding="12,4" Margin="6,0,0,0" Click="BtnPortTest_Click"/>
+            <Button x:Name="BtnTracert" Content="Tracert" Padding="12,4" Margin="6,0,0,0" Click="BtnTracert_Click"/>
+            <Button x:Name="BtnPathping" Content="Pathping" Padding="12,4" Margin="6,0,0,0" Click="BtnPathping_Click"/>
             <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
-            <Button Content="网络健康扫描" Padding="12,4" Margin="6,0,0,0" Click="BtnHealthScan_Click"
+            <Button x:Name="BtnHealthScan" Content="网络健康扫描" Padding="12,4" Margin="6,0,0,0" Click="BtnHealthScan_Click"
                     ToolTip="扫描常见的网络干扰源和异常配置（WinDivert/TUN/代理/PAC/VPN/WFP 等）"/>
             <Rectangle Width="1" Fill="{DynamicResource SeparatorBrush}" Margin="10,2"/>
             <Button x:Name="BtnDiagnosticBundle" Content="生成深度诊断包" Padding="12,4" Margin="6,0,0,0"
                     Click="BtnDiagnosticBundle_Click"
                     ToolTip="离线深度诊断：只读采集 IP/DNS/网关/路由/丢包/Traceroute/事件日志/连接/防火墙等，并压缩为 ZIP"/>
+            <Button x:Name="BtnCancelDiagnostic" Content="取消诊断" Padding="12,4" Margin="6,0,0,0"
+                    Visibility="Collapsed" Click="BtnCancelDiagnostic_Click"/>
             <CheckBox x:Name="ChkPacketCapture" Content="附带 10 秒 PktMon 抓包" Margin="10,0,0,0"
                       VerticalAlignment="Center"
-                      ToolTip="可帮助分析 ARP/广播风暴和异常流量；可能包含敏感网络元数据，默认关闭"/>
+                      ToolTip="可帮助分析 ARP/广播风暴和异常流量；128 字节截断仍可能包含 DNS 查询名、TLS SNI、HTTP 头片段等，默认关闭"/>
         </StackPanel>
 
         <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
