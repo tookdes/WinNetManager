@@ -17,9 +17,16 @@
                     ToolTip="离线深度诊断：只读采集 IP/DNS/网关/路由/丢包/Traceroute/事件日志/连接/防火墙等，并压缩为 ZIP"/>
             <Button x:Name="BtnCancelDiagnostic" Content="取消诊断" Padding="12,4" Margin="6,0,0,0"
                     Visibility="Collapsed" Click="BtnCancelDiagnostic_Click"/>
-            <CheckBox x:Name="ChkPacketCapture" Content="附带 10 秒 PktMon 抓包" Margin="10,0,0,0"
+            <CheckBox x:Name="ChkPacketCapture" Content="附带 PktMon 抓包" Margin="10,0,0,0"
                       VerticalAlignment="Center"
                       ToolTip="可帮助分析 ARP/广播风暴和异常流量；128 字节截断仍可能包含 DNS 查询名、TLS SNI、HTTP 头片段等，默认关闭"/>
+            <ComboBox x:Name="CmbPacketCaptureSeconds" Width="72" Margin="6,0,0,0"
+                      VerticalAlignment="Center" SelectedIndex="0"
+                      ToolTip="抓包持续时间">
+                <ComboBoxItem Content="10 秒" Tag="10"/>
+                <ComboBoxItem Content="30 秒" Tag="30"/>
+                <ComboBoxItem Content="60 秒" Tag="60"/>
+            </ComboBox>
         </StackPanel>
 
         <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
@@ -32,13 +39,13 @@
             </Grid.ColumnDefinitions>
             <Label Grid.Column="0" Content="目标：" VerticalAlignment="Center"/>
             <TextBox Grid.Column="1" x:Name="TxtTarget" Padding="4,2"
-                     ToolTip="IP 地址或域名"/>
+                     ToolTip="IP 地址、域名或 http(s) URL；生成深度诊断包时会作为本次故障目标额外测试"/>
             <Label Grid.Column="2" Content="端口：" VerticalAlignment="Center" Margin="8,0,0,0"/>
             <TextBox Grid.Column="3" x:Name="TxtPort" Padding="4,2" Text="443"
-                     ToolTip="TCP 端口，默认 443"/>
+                     ToolTip="TCP 端口，默认 443；用于域名/IP 目标。若目标是 URL，则按 URL 的协议/显式端口测试"/>
             <TextBlock Grid.Column="4" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"
                        Margin="12,0,0,0" VerticalAlignment="Center"
-                       Text="Tracert 和 Pathping 将弹出 PowerShell 窗口直接显示输出。"/>
+                       Text="Tracert/Pathping 使用此目标；生成深度诊断包时若目标非空，也会额外测试该域名/IP/URL 与端口。"/>
         </Grid>
 
         <TextBlock DockPanel.Dock="Top" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,6"

@@ -21,6 +21,13 @@ public sealed class DiagnosticBundleOptions
 {
     public bool IncludePacketCapture { get; set; }
     public int PacketCaptureSeconds { get; set; } = 10;
+
+    // Optional user-reported failing destination. Reuses the Network Diagnostics target/port fields.
+    public string CustomTarget { get; set; } = "";
+    public int? CustomPort { get; set; }
+
+    // Hard upper bound for pathological/broken systems. Partial evidence is retained on timeout.
+    public int TotalBudgetSeconds { get; set; } = 180;
 }
 
 public sealed class DiagnosticBundleResult
@@ -40,9 +47,11 @@ internal sealed class DiagnosticStepRecord
 {
     public string Name { get; set; } = "";
     public string File { get; set; } = "";
+    // OK / EMPTY / SKIP / WARN / FAIL
     public string Status { get; set; } = "OK";
     public int ExitCode { get; set; }
     public long DurationMs { get; set; }
+    public int? PowerShellErrorCount { get; set; }
     public string Error { get; set; } = "";
 }
 
@@ -58,7 +67,7 @@ internal sealed class PingProbeResult
     public string ResolvedAddress { get; set; } = "";
     public string DnsStatus { get; set; } = "";
     public string Error { get; set; } = "";
-    public double LossPercent => Sent <= 0 ? 100 : (Sent - Received) * 100.0 / Sent;
+    public double LossPercent => Sent <= 0 ? double.NaN : (Sent - Received) * 100.0 / Sent;
 }
 
 internal sealed class HttpProbeResult
@@ -109,9 +118,16 @@ public static class DiagnosticBundleService
         string zipPath,
         DiagnosticBundleOptions? options = null,
         IProgress<string>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken userCancellationToken = default)
     {
         options ??= new DiagnosticBundleOptions();
+        options.PacketCaptureSeconds = Math.Clamp(options.PacketCaptureSeconds, 5, 60);
+        int budgetSeconds = Math.Clamp(options.TotalBudgetSeconds, 60, 600);
+        options.TotalBudgetSeconds = budgetSeconds;
+        using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(userCancellationToken);
+        budgetCts.CancelAfter(TimeSpan.FromSeconds(budgetSeconds));
+        CancellationToken cancellationToken = budgetCts.Token;
+
         var started = DateTimeOffset.Now;
         string workDir = Path.Combine(
             Path.GetTempPath(),
@@ -149,13 +165,11 @@ public static class DiagnosticBundleService
             }
 
             var psSteps = BuildPowerShellSteps();
-            foreach (var step in psSteps)
+            foreach (var record in RunPowerShellStepsBounded(
+                         workDir, psSteps, progress, cancellationToken, maxDegreeOfParallelism: 3))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                progress?.Report(step.Name);
-                var record = RunPowerShellStep(workDir, step.File, step.Name, step.Script, step.TimeoutMs, cancellationToken);
                 records.Add(record);
-                if (record.Status != "OK") errorCount++;
+                if (IsStepError(record.Status)) errorCount++;
             }
 
             var nativeSteps = BuildNativeSteps();
@@ -165,14 +179,21 @@ public static class DiagnosticBundleService
                 progress?.Report(step.Name);
                 var record = RunNativeStep(workDir, step.File, step.Name, step.FileName, step.Arguments, step.TimeoutMs, cancellationToken);
                 records.Add(record);
-                if (record.Status != "OK") errorCount++;
+                if (IsStepError(record.Status)) errorCount++;
+            }
+
+            progress?.Report("按系统能力收集 Wi-Fi / 802.1X / WWAN 状态...");
+            foreach (var record in RunCapabilityDependentAdapterSteps(workDir, cancellationToken))
+            {
+                records.Add(record);
+                if (IsStepError(record.Status)) errorCount++;
             }
 
             progress?.Report("导出 Windows Filtering Platform (WFP) 状态...");
             foreach (var record in CollectWfpSnapshot(workDir, cancellationToken))
             {
                 records.Add(record);
-                if (record.Status == "WARN") errorCount++;
+                if (IsStepError(record.Status)) errorCount++;
             }
 
             progress?.Report("采样网卡流量、丢包和错误计数（5 秒）...");
@@ -222,7 +243,7 @@ public static class DiagnosticBundleService
             foreach (var record in RunConditionalTraceroutes(workDir, pingResults, cancellationToken))
             {
                 records.Add(record);
-                if (record.Status == "WARN") errorCount++;
+                if (IsStepError(record.Status)) errorCount++;
             }
 
             progress?.Report("测试 HTTP / HTTPS（直连与系统代理路径）...");
@@ -235,6 +256,17 @@ public static class DiagnosticBundleService
             {
                 WriteText(workDir, "05-connectivity/http-error.txt", ex.ToString());
                 errorCount++;
+            }
+
+            if (!string.IsNullOrWhiteSpace(options.CustomTarget))
+            {
+                progress?.Report($"测试用户指定故障目标：{options.CustomTarget}...");
+                foreach (var record in RunCustomTargetDiagnostics(
+                    workDir, options, pingResults, httpResults, findings, ref warningCount, cancellationToken))
+                {
+                    records.Add(record);
+                    if (IsStepError(record.Status)) errorCount++;
+                }
             }
 
             progress?.Report("检查近期 IP 冲突与网络事件...");
@@ -257,9 +289,9 @@ public static class DiagnosticBundleService
             if (options.IncludePacketCapture)
             {
                 progress?.Report($"附加 PktMon 抓包（{options.PacketCaptureSeconds} 秒）...");
-                var captureRecord = CapturePktMon(workDir, Math.Clamp(options.PacketCaptureSeconds, 5, 30), cancellationToken);
+                var captureRecord = CapturePktMon(workDir, Math.Clamp(options.PacketCaptureSeconds, 5, 60), cancellationToken);
                 records.Add(captureRecord);
-                if (captureRecord.Status == "WARN") errorCount++;
+                if (IsStepError(captureRecord.Status)) errorCount++;
             }
 
             progress?.Report("生成 SUMMARY.md 与 manifest.json...");
@@ -302,6 +334,21 @@ public static class DiagnosticBundleService
                 FileCount = fileCount,
                 WarningCount = warningCount,
                 ErrorCount = errorCount
+            };
+        }
+        catch (OperationCanceledException) when (
+            !userCancellationToken.IsCancellationRequested &&
+            cancellationToken.IsCancellationRequested)
+        {
+            return new DiagnosticBundleResult
+            {
+                Success = false,
+                Cancelled = false,
+                WorkingDirectory = workDir,
+                Duration = DateTimeOffset.Now - started,
+                WarningCount = warningCount,
+                ErrorCount = errorCount + 1,
+                ErrorMessage = $"深度诊断超过总时间预算 {budgetSeconds} 秒，已停止后续采集。已完成的临时文件已保留。"
             };
         }
         catch (OperationCanceledException)
@@ -654,13 +701,19 @@ Get-NetFirewallRule -Enabled True -ErrorAction SilentlyContinue |
   ConvertTo-Csv -NoTypeInformation
 """, 30000),
 
-            ("07-firewall/block-rules-detail.txt", "收集启用的阻止规则及端口/地址过滤器", """
+            ("07-firewall/block-rules-detail.txt", "收集启用的阻止规则及端口/地址/程序过滤器", """
 $rules = Get-NetFirewallRule -Enabled True -Action Block -ErrorAction SilentlyContinue
 foreach ($r in $rules) {
   "===== $($r.DisplayName) ====="
   $r | Select-Object Name,DisplayName,Direction,Action,Profile,InterfaceType,PolicyStoreSource | Format-List | Out-String -Width 4096
+  "----- Address Filter -----"
   $r | Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue | Format-List * | Out-String -Width 4096
+  "----- Port Filter -----"
   $r | Get-NetFirewallPortFilter -ErrorAction SilentlyContinue | Format-List * | Out-String -Width 4096
+  "----- Application Filter -----"
+  $r | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue |
+    Select-Object Program,Package |
+    Format-List * | Out-String -Width 4096
 }
 """, 30000),
 
@@ -784,7 +837,7 @@ foreach ($log in $logs) {
 $start = (Get-Date).AddHours(-48)
 $logs = @('Microsoft-Windows-DNS-Client/Operational','System')
 foreach ($logName in $logs) {
-  $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
+  $log = Get-WinEvent -ListLog $logName -ErrorAction Ignore
   if (-not $log) { continue }
   "===== $logName ====="
   if (-not $log.IsEnabled) {
@@ -809,7 +862,7 @@ $logs = @(
   'Microsoft-Windows-Hyper-V-VmSwitch/Operational'
 )
 foreach ($logName in $logs) {
-  $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
+  $log = Get-WinEvent -ListLog $logName -ErrorAction Ignore
   "===== $logName ====="
   if (-not $log) {
     "Log not present."
@@ -824,6 +877,43 @@ foreach ($logName in $logs) {
     Format-List * | Out-String -Width 4096
 }
 """, 25000),
+
+            ("10-events/platform-network-events-48h.txt", "收集 NLA/WFP/防火墙/转发/DHCPv6 专用事件", """
+$start = (Get-Date).AddHours(-48)
+$logs = @(
+  'Microsoft-Windows-NlaSvc/Operational',
+  'Microsoft-Windows-WFP/Operational',
+  'Microsoft-Windows-Windows Firewall With Advanced Security/Firewall',
+  'Microsoft-Windows-Windows Firewall With Advanced Security/FirewallDiagnostics',
+  'Microsoft-Windows-Forwarding/Operational',
+  'Microsoft-Windows-Dhcpv6-Client/Admin',
+  'Microsoft-Windows-Dhcpv6-Client/Operational'
+)
+foreach ($logName in $logs) {
+  "===== $logName ====="
+  $log = Get-WinEvent -ListLog $logName -ErrorAction Ignore
+  if (-not $log) {
+    "Log not present."
+    continue
+  }
+
+  $log | Select-Object LogName,IsEnabled,RecordCount,LastWriteTime,MaximumSizeInBytes,FileSize |
+    Format-List * | Out-String -Width 4096
+
+  if (-not $log.IsEnabled) {
+    "Log is disabled."
+    continue
+  }
+
+  try {
+    Get-WinEvent -FilterHashtable @{LogName=$logName;StartTime=$start} -MaxEvents 800 -ErrorAction Stop |
+      Select-Object TimeCreated,Id,LevelDisplayName,ProviderName,Message |
+      Format-List * | Out-String -Width 4096
+  } catch {
+    "ERROR: $($_.Exception.Message)"
+  }
+}
+""", 30000),
 
             ("10-events/wlan-events-48h.txt", "收集最近 48 小时 Wi-Fi 连接事件", """
 $start = (Get-Date).AddHours(-48)
@@ -851,14 +941,6 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             ("02-adapters/netsh-ipv4-config.txt", "收集 netsh IPv4 配置", "netsh.exe", "interface ipv4 show config", 15000),
             ("02-adapters/netsh-ipv6-interfaces.txt", "收集 netsh IPv6 接口", "netsh.exe", "interface ipv6 show interfaces", 15000),
             ("03-routing/netsh-ipv6-routes.txt", "收集 netsh IPv6 路由", "netsh.exe", "interface ipv6 show route", 15000),
-            ("02-adapters/wlan-interfaces.txt", "收集当前 Wi-Fi 连接", "netsh.exe", "wlan show interfaces", 15000),
-            ("02-adapters/wlan-drivers.txt", "收集 Wi-Fi 驱动能力", "netsh.exe", "wlan show drivers", 15000),
-            ("02-adapters/wlan-settings.txt", "收集 Wi-Fi 全局设置", "netsh.exe", "wlan show settings", 10000),
-            ("02-adapters/wlan-profiles.txt", "列出 Wi-Fi 配置文件（不含密钥）", "netsh.exe", "wlan show profiles", 10000),
-            ("02-adapters/lan-interfaces.txt", "收集有线 802.1X 接口状态", "netsh.exe", "lan show interfaces", 10000),
-            ("02-adapters/lan-settings.txt", "收集有线 802.1X 全局设置", "netsh.exe", "lan show settings", 10000),
-            ("02-adapters/lan-profiles.txt", "列出有线 802.1X 配置文件", "netsh.exe", "lan show profiles", 10000),
-            ("02-adapters/mbn-interfaces.txt", "收集蜂窝/WWAN 接口", "netsh.exe", "mbn show interfaces", 10000),
             ("02-adapters/tcp-global.txt", "收集 netsh TCP 全局设置", "netsh.exe", "interface tcp show global", 15000),
             ("02-adapters/ipv6-prefix-policies.txt", "收集 IPv6 前缀优先级策略", "netsh.exe", "interface ipv6 show prefixpolicies", 15000),
             ("02-adapters/teredo-state.txt", "收集 Teredo 状态", "netsh.exe", "interface teredo show state", 10000),
@@ -880,15 +962,58 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         };
     }
 
+    private static List<DiagnosticStepRecord> RunPowerShellStepsBounded(
+        string root,
+        List<(string File, string Name, string Script, int TimeoutMs)> steps,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken,
+        int maxDegreeOfParallelism)
+    {
+        using var gate = new SemaphoreSlim(Math.Max(1, maxDegreeOfParallelism));
+
+        var tasks = steps.Select(async step =>
+        {
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(step.Name);
+                return await Task.Run(
+                    () => RunPowerShellStep(
+                        root, step.File, step.Name, step.Script, step.TimeoutMs, cancellationToken),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToArray();
+
+        // Task.WhenAll preserves input ordering, so SUMMARY remains deterministic.
+        return Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
+    }
+
     private static DiagnosticStepRecord RunPowerShellStep(
         string root, string relative, string name, string script, int timeoutMs, CancellationToken cancellationToken)
     {
-        var sw = Stopwatch.StartNew();
-        string output = ProcessRunner.RunPowerShell(script, out string error, out int exitCode, timeoutMs, cancellationToken);
-        sw.Stop();
-        string status = exitCode == 0 && string.IsNullOrWhiteSpace(error) ? "OK" : "WARN";
+        // PowerShell cmdlets often use -ErrorAction SilentlyContinue. Without instrumentation,
+        // a collector can fail and still exit 0 with an empty file. Record non-terminating errors
+        // separately so "nothing exists" is distinguishable from "we failed to collect it".
+        string instrumented =
+            "$Error.Clear();\n" +
+            script +
+            "\n$__wnmErrorCount = $Error.Count; Write-Output \"__WNM_ERROR_COUNT=$__wnmErrorCount\"";
 
-        WriteCommandResult(root, relative, name, "PowerShell", output, error, exitCode, sw.Elapsed);
+        var sw = Stopwatch.StartNew();
+        string output = ProcessRunner.RunPowerShell(
+            instrumented, out string error, out int exitCode, timeoutMs, cancellationToken);
+        sw.Stop();
+
+        int psErrorCount = ExtractPowerShellErrorCount(ref output);
+        string status = ClassifyStep(exitCode, error, output, psErrorCount);
+
+        WriteCommandResult(root, relative, name, "PowerShell", output, error, exitCode, sw.Elapsed,
+            extraHeader: $"PowerShellErrorCount: {psErrorCount}");
         return new DiagnosticStepRecord
         {
             Name = name,
@@ -896,6 +1021,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             Status = status,
             ExitCode = exitCode,
             DurationMs = sw.ElapsedMilliseconds,
+            PowerShellErrorCount = psErrorCount,
             Error = error
         };
     }
@@ -906,7 +1032,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var sw = Stopwatch.StartNew();
         string output = ProcessRunner.RunNative(fileName, arguments, out string error, out int exitCode, timeoutMs, cancellationToken);
         sw.Stop();
-        string status = exitCode == 0 && string.IsNullOrWhiteSpace(error) ? "OK" : "WARN";
+        string status = ClassifyStep(exitCode, error, output);
 
         WriteCommandResult(root, relative, name, $"{fileName} {arguments}", output, error, exitCode, sw.Elapsed);
         return new DiagnosticStepRecord
@@ -918,6 +1044,96 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             DurationMs = sw.ElapsedMilliseconds,
             Error = error
         };
+    }
+
+    private static List<DiagnosticStepRecord> RunCapabilityDependentAdapterSteps(
+        string root,
+        CancellationToken cancellationToken)
+    {
+        var records = new List<DiagnosticStepRecord>();
+        var states = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        string stateOutput = ProcessRunner.RunPowerShell(
+            "Get-Service -Name WlanSvc,dot3svc,WwanSvc -ErrorAction SilentlyContinue | " +
+            "Select-Object Name,Status | ConvertTo-Csv -NoTypeInformation",
+            out string stateError,
+            out int stateExit,
+            10000,
+            cancellationToken);
+
+        if (stateExit == 0 && string.IsNullOrWhiteSpace(stateError))
+        {
+            var lines = stateOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 1; i < lines.Length; i++)
+            {
+                var parts = CsvParser.ParseLine(lines[i]);
+                if (parts.Length >= 2)
+                    states[parts[0].Trim()] = parts[1].Trim();
+            }
+        }
+
+        bool StateKnown(string service) => states.ContainsKey(service);
+        bool Running(string service) =>
+            states.TryGetValue(service, out string? status) &&
+            status.Equals("Running", StringComparison.OrdinalIgnoreCase);
+
+        void SkipGroup(string relative, string name, string service)
+        {
+            string reason = StateKnown(service)
+                ? $"{service} 未运行，相关 netsh 上下文会产生无意义的 exit 1，因此已条件跳过。"
+                : $"{service} 状态无法确认；为避免把缺失功能误报为网络故障，已条件跳过。";
+            WriteText(root, relative, reason);
+            records.Add(new DiagnosticStepRecord
+            {
+                Name = name,
+                File = relative,
+                Status = "SKIP",
+                ExitCode = 0,
+                Error = reason
+            });
+        }
+
+        if (Running("WlanSvc"))
+        {
+            records.Add(RunNativeStep(root, "02-adapters/wlan-interfaces.txt", "收集当前 Wi-Fi 连接",
+                "netsh.exe", "wlan show interfaces", 15000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/wlan-drivers.txt", "收集 Wi-Fi 驱动能力",
+                "netsh.exe", "wlan show drivers", 15000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/wlan-settings.txt", "收集 Wi-Fi 全局设置",
+                "netsh.exe", "wlan show settings", 10000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/wlan-profiles.txt", "列出 Wi-Fi 配置文件（不含密钥）",
+                "netsh.exe", "wlan show profiles", 10000, cancellationToken));
+        }
+        else
+        {
+            SkipGroup("02-adapters/wlan-skipped.txt", "Wi-Fi netsh 采集", "WlanSvc");
+        }
+
+        if (Running("dot3svc"))
+        {
+            records.Add(RunNativeStep(root, "02-adapters/lan-interfaces.txt", "收集有线 802.1X 接口状态",
+                "netsh.exe", "lan show interfaces", 10000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/lan-settings.txt", "收集有线 802.1X 全局设置",
+                "netsh.exe", "lan show settings", 10000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/lan-profiles.txt", "列出有线 802.1X 配置文件",
+                "netsh.exe", "lan show profiles", 10000, cancellationToken));
+        }
+        else
+        {
+            SkipGroup("02-adapters/lan-skipped.txt", "有线 802.1X netsh 采集", "dot3svc");
+        }
+
+        if (Running("WwanSvc"))
+        {
+            records.Add(RunNativeStep(root, "02-adapters/mbn-interfaces.txt", "收集蜂窝/WWAN 接口",
+                "netsh.exe", "mbn show interfaces", 10000, cancellationToken));
+        }
+        else
+        {
+            SkipGroup("02-adapters/mbn-skipped.txt", "WWAN/MBN netsh 采集", "WwanSvc");
+        }
+
+        return records;
     }
 
     private static List<DiagnosticStepRecord> CollectWfpSnapshot(string root, CancellationToken cancellationToken)
@@ -957,7 +1173,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             sw.Stop();
 
             bool hasFile = File.Exists(path) && new FileInfo(path).Length > 0;
-            string status = exitCode == 0 && hasFile ? "OK" : "WARN";
+            string status = exitCode != 0 ? "FAIL" : hasFile ? "OK" : "WARN";
             string control = $"Command: netsh {args}\r\nExitCode: {exitCode}\r\nDuration: {sw.Elapsed.TotalSeconds:F2}s\r\n" +
                              $"Output file: {path}\r\nExists: {hasFile}\r\n\r\n{output}\r\n{error}";
             WriteText(root, job.Relative + ".log.txt", control);
@@ -985,18 +1201,54 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     {
         bool publicIpv4Responded = pings.Any(p =>
             p.Kind.StartsWith("Public IPv4", StringComparison.Ordinal) && p.Received > 0);
+        bool publicIpv6Responded = pings.Any(p =>
+            p.Kind.StartsWith("Public IPv6", StringComparison.Ordinal) && p.Received > 0);
 
-        if (!publicIpv4Responded && !HasUsableIpv4DefaultRoute())
+        // Do not require a gateway object: PPPoE/on-link/default-route implementations can
+        // have a usable path without exposing a conventional next-hop in GatewayAddresses.
+        bool tryIpv4 = publicIpv4Responded || HasUsableIpv4Address();
+        bool tryIpv6 = publicIpv6Responded || HasUsableGlobalIpv6Address();
+
+        var targets = new List<(string Target, string File, string Name, string FamilyArg)>();
+        if (tryIpv4)
         {
-            const string reason =
-                "跳过公网 Traceroute：当前没有可用 IPv4 默认网关，且公共 IPv4 Ping 无响应。此时 Traceroute 对定位 DHCP/APIPA/本地链路故障价值较低。";
-            WriteText(root, "05-connectivity/traceroute-skipped.txt", reason);
+            targets.Add(("223.5.5.5",
+                "05-connectivity/traceroute-223.5.5.5.txt",
+                "IPv4 Traceroute 到阿里 DNS 223.5.5.5",
+                "-4"));
+            targets.Add(("1.1.1.1",
+                "05-connectivity/traceroute-1.1.1.1.txt",
+                "IPv4 Traceroute 到 1.1.1.1",
+                "-4"));
+        }
+        else
+        {
+            WriteText(root, "05-connectivity/traceroute-ipv4-skipped.txt",
+                "跳过 IPv4 Traceroute：未检测到可用非 APIPA IPv4 地址，且公共 IPv4 Ping 无响应。");
+        }
+
+        if (tryIpv6)
+        {
+            targets.Add(("2400:3200::1",
+                "05-connectivity/traceroute-ipv6-2400-3200--1.txt",
+                "IPv6 Traceroute 到阿里 DNS 2400:3200::1",
+                "-6"));
+        }
+        else
+        {
+            WriteText(root, "05-connectivity/traceroute-ipv6-skipped.txt",
+                "跳过 IPv6 Traceroute：未检测到 2000::/3 全局单播 IPv6 地址，且公共 IPv6 Ping 无响应。");
+        }
+
+        if (targets.Count == 0)
+        {
+            const string reason = "IPv4/IPv6 均无可用路径候选，已跳过公网 Traceroute。";
             return new List<DiagnosticStepRecord>
             {
                 new()
                 {
                     Name = "公网 Traceroute",
-                    File = "05-connectivity/traceroute-skipped.txt",
+                    File = "05-connectivity/traceroute-ipv4-skipped.txt",
                     Status = "SKIP",
                     ExitCode = 0,
                     Error = reason
@@ -1004,21 +1256,17 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             };
         }
 
-        var targets = new[]
-        {
-            (Target: "223.5.5.5", File: "05-connectivity/traceroute-223.5.5.5.txt", Name: "Traceroute 到阿里 DNS 223.5.5.5"),
-            (Target: "1.1.1.1", File: "05-connectivity/traceroute-1.1.1.1.txt", Name: "Traceroute 到 1.1.1.1")
-        };
-
-        // -d 避免逐跳反向 DNS；12 hops * 3 probes * 400ms，完全断网时单条约 15 秒封顶。
+        // -d avoids reverse-DNS per hop; bounded hop/wait values keep broken links from
+        // dominating the diagnostic runtime.
         var tasks = targets.Select(t => Task.Run(() =>
             RunNativeStep(root, t.File, t.Name, "tracert.exe",
-                $"-d -h 12 -w 400 {t.Target}", 20000, cancellationToken), cancellationToken)).ToArray();
+                $"{t.FamilyArg} -d -h 12 -w 400 {t.Target}", 20000, cancellationToken),
+            cancellationToken)).ToArray();
 
         return Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
     }
 
-    private static bool HasUsableIpv4DefaultRoute()
+    private static bool HasUsableIpv4Address()
     {
         foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
         {
@@ -1028,31 +1276,45 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
             try
             {
-                var props = ni.GetIPProperties();
-                bool hasUsableV4 = props.UnicastAddresses.Any(a =>
+                bool usable = ni.GetIPProperties().UnicastAddresses.Any(a =>
                 {
                     if (a.Address.AddressFamily != AddressFamily.InterNetwork ||
                         IPAddress.IsLoopback(a.Address))
                         return false;
+
                     byte[] b = a.Address.GetAddressBytes();
                     return !(b.Length == 4 && b[0] == 169 && b[1] == 254);
                 });
 
-                bool hasGateway = props.GatewayAddresses.Any(g =>
-                    g.Address.AddressFamily == AddressFamily.InterNetwork &&
-                    !g.Address.Equals(IPAddress.Any));
-
-                if (hasUsableV4 && hasGateway)
+                if (usable)
                     return true;
             }
             catch { }
         }
+        return false;
+    }
 
+    private static bool HasUsableGlobalIpv6Address()
+    {
+        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up ||
+                ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                continue;
+
+            try
+            {
+                if (ni.GetIPProperties().UnicastAddresses.Any(a => IsGlobalUnicastIpv6(a.Address)))
+                    return true;
+            }
+            catch { }
+        }
         return false;
     }
 
     private static void WriteCommandResult(
-        string root, string relative, string title, string command, string output, string error, int exitCode, TimeSpan duration)
+        string root, string relative, string title, string command, string output, string error, int exitCode, TimeSpan duration,
+        string? extraHeader = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# {title}");
@@ -1060,6 +1322,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine($"# Command: {command}");
         sb.AppendLine($"# ExitCode: {exitCode}");
         sb.AppendLine($"# Duration: {duration.TotalSeconds:F2}s");
+        if (!string.IsNullOrWhiteSpace(extraHeader))
+            sb.AppendLine($"# {extraHeader}");
         sb.AppendLine();
         if (!string.IsNullOrWhiteSpace(output))
             sb.AppendLine(output.TrimEnd());
@@ -1070,6 +1334,58 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             sb.AppendLine(error.TrimEnd());
         }
         WriteText(root, relative, sb.ToString());
+    }
+
+    internal static bool IsGlobalUnicastIpv6(IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetworkV6 ||
+            IPAddress.IsLoopback(address) ||
+            address.IsIPv6LinkLocal ||
+            address.IsIPv6Multicast)
+            return false;
+
+        // RFC 4291 global-unicast space is 2000::/3.
+        // This deliberately excludes ULA fc00::/7 and obsolete site-local ranges.
+        byte[] bytes = address.GetAddressBytes();
+        return bytes.Length == 16 && (bytes[0] & 0xE0) == 0x20;
+    }
+
+    private static bool IsStepError(string status)
+        => status is "WARN" or "FAIL";
+
+    internal static string ClassifyStep(
+        int exitCode,
+        string error,
+        string output,
+        int powerShellErrorCount = 0)
+    {
+        if (exitCode != 0)
+            return "FAIL";
+        if (!string.IsNullOrWhiteSpace(error) || powerShellErrorCount > 0)
+            return "WARN";
+        return string.IsNullOrWhiteSpace(output) ? "EMPTY" : "OK";
+    }
+
+    private static int ExtractPowerShellErrorCount(ref string output)
+    {
+        const string prefix = "__WNM_ERROR_COUNT=";
+        int count = 0;
+        var kept = new List<string>();
+
+        foreach (string line in (output ?? "").Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+        {
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith(prefix, StringComparison.Ordinal) &&
+                int.TryParse(trimmed[prefix.Length..], out int parsed))
+            {
+                count = parsed;
+                continue;
+            }
+            kept.Add(line);
+        }
+
+        output = string.Join(Environment.NewLine, kept).TrimEnd();
+        return count;
     }
 
     private static void WriteHealthSnapshot(string root, List<NetworkHealthItem> items)
@@ -1187,10 +1503,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 try
                 {
                     return n.GetIPProperties().UnicastAddresses.Any(a =>
-                        a.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
-                        !a.Address.IsIPv6LinkLocal &&
-                        !a.Address.IsIPv6SiteLocal &&
-                        !IPAddress.IsLoopback(a.Address));
+                        IsGlobalUnicastIpv6(a.Address));
                 }
                 catch { return false; }
             });
@@ -1209,7 +1522,10 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var sb = new StringBuilder();
         sb.AppendLine("Target\tKind\tResolvedAddress\tDnsStatus\tSent\tReceived\tLoss%\tMinMs\tAvgMs\tMaxMs\tError");
         foreach (var r in results)
-            sb.AppendLine($"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{EscapeTsv(r.DnsStatus)}\t{r.Sent}\t{r.Received}\t{r.LossPercent:F1}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
+        {
+            string loss = double.IsNaN(r.LossPercent) ? "" : r.LossPercent.ToString("F1");
+            sb.AppendLine($"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{EscapeTsv(r.DnsStatus)}\t{r.Sent}\t{r.Received}\t{loss}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
+        }
         WriteText(root, "05-connectivity/ping-tests.tsv", sb.ToString());
 
         foreach (var g in results.Where(r => r.Kind == "Gateway" && r.Received > 0 && r.LossPercent >= 20))
@@ -1223,7 +1539,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
     private static PingProbeResult PingTarget(string target, string kind, int count, int timeoutMs, CancellationToken cancellationToken)
     {
-        var result = new PingProbeResult { Target = target, Kind = kind, Sent = count };
+        var result = new PingProbeResult { Target = target, Kind = kind };
         var times = new List<long>();
 
         try
@@ -1266,6 +1582,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 result.ResolvedAddress = target;
             }
 
+            result.Sent = count;
             using var ping = new Ping();
             for (int i = 0; i < count; i++)
             {
@@ -1393,6 +1710,189 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             r.DurationMs = sw.ElapsedMilliseconds;
         }
         return r;
+    }
+
+    private static List<DiagnosticStepRecord> RunCustomTargetDiagnostics(
+        string root,
+        DiagnosticBundleOptions options,
+        List<PingProbeResult> pingResults,
+        List<HttpProbeResult> httpResults,
+        List<string> findings,
+        ref int warningCount,
+        CancellationToken cancellationToken)
+    {
+        var records = new List<DiagnosticStepRecord>();
+        string raw = (options.CustomTarget ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+            return records;
+
+        string host = raw;
+        int port = options.CustomPort is > 0 and <= 65535 ? options.CustomPort.Value : 443;
+        string? url = null;
+
+        if (Uri.TryCreate(raw, UriKind.Absolute, out var uri) &&
+            (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+             uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+        {
+            host = uri.Host;
+            port = uri.IsDefaultPort
+                ? (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ? 443 : 80)
+                : uri.Port;
+            url = uri.ToString();
+        }
+        else if (host.StartsWith("[", StringComparison.Ordinal) &&
+                 host.EndsWith("]", StringComparison.Ordinal))
+        {
+            host = host[1..^1];
+        }
+
+        var sw = Stopwatch.StartNew();
+        var ping = PingTarget(host, "Custom target", 3, 900, cancellationToken);
+        pingResults.Add(ping);
+
+        IPAddress? endpointAddress = null;
+        if (IPAddress.TryParse(host, out var literal))
+        {
+            endpointAddress = literal;
+        }
+        else if (!string.IsNullOrWhiteSpace(ping.ResolvedAddress))
+        {
+            endpointAddress = ping.ResolvedAddress
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => IPAddress.TryParse(s.Trim(), out var ip) ? ip : null)
+                .FirstOrDefault(ip => ip != null);
+        }
+
+        bool tcpAttempted = endpointAddress != null;
+        bool tcpConnected = false;
+        string tcpDetail = "";
+        long tcpMs = 0;
+
+        if (endpointAddress != null)
+        {
+            var tcpSw = Stopwatch.StartNew();
+            try
+            {
+                using var tcp = new TcpClient(endpointAddress.AddressFamily);
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(4));
+                tcp.ConnectAsync(endpointAddress, port, timeoutCts.Token).AsTask().GetAwaiter().GetResult();
+                tcpConnected = tcp.Connected;
+                tcpDetail = tcpConnected ? "Connected" : "Connect returned without an established socket";
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                tcpDetail = "TCP connect timed out after 4 seconds";
+            }
+            catch (Exception ex)
+            {
+                tcpDetail = ex.GetBaseException().Message;
+            }
+            finally
+            {
+                tcpSw.Stop();
+                tcpMs = tcpSw.ElapsedMilliseconds;
+            }
+        }
+        else
+        {
+            tcpDetail = "Skipped because the target did not resolve to an IP address.";
+        }
+
+        HttpProbeResult? customDirect = null;
+        HttpProbeResult? customProxy = null;
+        if (url != null)
+        {
+            customDirect = HttpProbe(url, useProxy: false, cancellationToken);
+            customProxy = HttpProbe(url, useProxy: true, cancellationToken);
+            httpResults.Add(customDirect);
+            httpResults.Add(customProxy);
+
+            if (!customDirect.ResponseReceived && !customProxy.ResponseReceived && tcpConnected)
+            {
+                findings.Add($"[警告] 用户指定目标 {host}:{port} TCP 可连接，但 URL {url} 的直连和系统代理 HTTP(S) 均未收到响应：重点检查 TLS、HTTP、SNI、证书或应用层过滤。");
+                warningCount++;
+            }
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("# 用户指定故障目标");
+        sb.AppendLine($"Input: {raw}");
+        sb.AppendLine($"Host: {host}");
+        sb.AppendLine($"Port: {port}");
+        sb.AppendLine($"DNS status: {(string.IsNullOrWhiteSpace(ping.DnsStatus) ? "literal IP / not required" : ping.DnsStatus)}");
+        sb.AppendLine($"Resolved addresses: {ping.ResolvedAddress}");
+        sb.AppendLine($"Ping: {(ping.Sent <= 0 ? "not sent" : $"{ping.Received}/{ping.Sent}, loss {(double.IsNaN(ping.LossPercent) ? "unknown" : $"{ping.LossPercent:F0}%")}")}");
+        sb.AppendLine($"TCP attempted: {tcpAttempted}");
+        sb.AppendLine($"TCP endpoint: {(endpointAddress == null ? "-" : endpointAddress.ToString())}:{port}");
+        sb.AppendLine($"TCP connected: {tcpConnected}");
+        sb.AppendLine($"TCP duration: {tcpMs} ms");
+        sb.AppendLine($"TCP detail: {tcpDetail}");
+        if (url != null)
+        {
+            sb.AppendLine($"URL: {url}");
+            if (customDirect != null)
+                sb.AppendLine($"HTTP direct: response={customDirect.ResponseReceived}, status={customDirect.StatusCode}, success={customDirect.Success}, detail={customDirect.Detail}");
+            if (customProxy != null)
+                sb.AppendLine($"HTTP system-proxy: response={customProxy.ResponseReceived}, status={customProxy.StatusCode}, success={customProxy.Success}, detail={customProxy.Detail}");
+        }
+
+        WriteText(root, "05-connectivity/custom-target.txt", sb.ToString());
+        sw.Stop();
+
+        records.Add(new DiagnosticStepRecord
+        {
+            Name = "用户指定目标 DNS/Ping/TCP/HTTP 探测",
+            File = "05-connectivity/custom-target.txt",
+            Status = "OK",
+            ExitCode = 0,
+            DurationMs = sw.ElapsedMilliseconds
+        });
+
+        if (endpointAddress == null)
+        {
+            string reason = ping.DnsStatus == "Timeout" ? "DNS 解析超时" : "未获得可用 IP 地址";
+            findings.Add($"[警告] 用户指定目标 {raw}：{reason}，因此未执行 TCP/Traceroute。");
+            warningCount++;
+
+            WriteText(root, "05-connectivity/custom-target-traceroute-skipped.txt",
+                $"Skipped: {reason}. Input={raw}");
+            records.Add(new DiagnosticStepRecord
+            {
+                Name = "用户指定目标 Traceroute",
+                File = "05-connectivity/custom-target-traceroute-skipped.txt",
+                Status = "SKIP",
+                ExitCode = 0,
+                Error = reason
+            });
+            return records;
+        }
+
+        if (!tcpConnected)
+        {
+            findings.Add($"[警告] 用户指定目标 {host} ({endpointAddress}):{port} TCP 连接失败：{tcpDetail}");
+            warningCount++;
+        }
+        else
+        {
+            findings.Add($"[提示] 用户指定目标 {host} ({endpointAddress}):{port} TCP 可连接（{tcpMs} ms）。");
+        }
+
+        string familyArg = endpointAddress.AddressFamily == AddressFamily.InterNetworkV6 ? "-6" : "-4";
+        records.Add(RunNativeStep(
+            root,
+            "05-connectivity/custom-target-traceroute.txt",
+            $"用户指定目标 Traceroute {endpointAddress}",
+            "tracert.exe",
+            $"{familyArg} -d -h 12 -w 400 {endpointAddress}",
+            20000,
+            cancellationToken));
+
+        return records;
     }
 
     private static IPAddress[] ResolveHostWithTimeout(string host, int timeoutMs, CancellationToken cancellationToken = default)
@@ -1524,14 +2024,14 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     {
         var subsystem = records.FirstOrDefault(r =>
             string.Equals(r.File, "00-summary/subsystem-health.txt", StringComparison.OrdinalIgnoreCase));
-        if (subsystem?.Status == "WARN")
+        if (subsystem != null && IsStepError(subsystem.Status))
         {
             findings.Add("[警告] 诊断依赖的 Winmgmt/EventLog/BFE 或核心 Get-Net* cmdlet 存在异常；部分 PowerShell/CIM/WFP/事件采集可能不完整，请优先查看 00-summary/subsystem-health.txt，并以 ipconfig/route/netsh/netstat 等原生命令文件交叉验证。");
             warningCount++;
         }
 
         int psWarnings = records.Count(r =>
-            r.Status == "WARN" &&
+            IsStepError(r.Status) &&
             (r.File.StartsWith("02-adapters/", StringComparison.OrdinalIgnoreCase) ||
              r.File.StartsWith("03-routing/", StringComparison.OrdinalIgnoreCase) ||
              r.File.StartsWith("09-connections/", StringComparison.OrdinalIgnoreCase) ||
@@ -1618,10 +2118,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                     !g.Address.Equals(IPAddress.Any));
 
                 anyGlobalIpv6 |= props.UnicastAddresses.Any(a =>
-                    a.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
-                    !a.Address.IsIPv6LinkLocal &&
-                    !a.Address.IsIPv6SiteLocal &&
-                    !IPAddress.IsLoopback(a.Address));
+                    IsGlobalUnicastIpv6(a.Address));
                 anyIpv6Gateway |= props.GatewayAddresses.Any(g =>
                     g.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
                     !g.Address.Equals(IPAddress.IPv6Any));
@@ -1731,9 +2228,24 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         string pcapng = Path.Combine(dir, "pktmon.pcapng");
         var sw = Stopwatch.StartNew();
         var log = new StringBuilder();
+        var captureWarnings = new List<string>();
 
         // Record pre-existing state. We intentionally do not call "pktmon stop" here:
         // another administrator may already be using an active capture.
+        string filterOutput = ProcessRunner.RunNative(
+            pktmonExe, "filter list", out string filterError, out int filterCode, 10000, cancellationToken);
+        WriteCommandResult(
+            root,
+            "11-packet-capture/pktmon-filters-before.txt",
+            "PktMon 活动过滤器（抓包前）",
+            "pktmon filter list",
+            filterOutput,
+            filterError,
+            filterCode,
+            TimeSpan.Zero);
+        if (filterCode != 0)
+            captureWarnings.Add("无法读取 PktMon 现有过滤器状态。");
+
         string statusOutput = ProcessRunner.RunNative(
             pktmonExe, "status", out string statusError, out int statusCode, 10000, cancellationToken);
         log.AppendLine("=== pktmon status before start ===");
@@ -1764,6 +2276,19 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             };
         }
 
+        // We own this newly-started capture, so reset its counters to create a clean
+        // baseline. The final counters then represent this capture window rather than
+        // a cumulative value inherited from earlier monitoring.
+        string resetOutput = ProcessRunner.RunNative(
+            pktmonExe, "reset", out string resetError, out int resetCode, 10000, cancellationToken);
+        bool countersReset = resetCode == 0;
+        if (!countersReset)
+            captureWarnings.Add("PktMon counters reset 失败，drop counters 可能包含抓包前累计值。");
+        log.AppendLine("=== pktmon reset ===");
+        log.AppendLine(resetOutput);
+        log.AppendLine(resetError);
+        log.AppendLine($"reset exit={resetCode}");
+
         try
         {
             if (cancellationToken.WaitHandle.WaitOne(TimeSpan.FromSeconds(seconds)))
@@ -1771,12 +2296,16 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
             string counters = ProcessRunner.RunNative(
                 pktmonExe,
-                "counters --type drop --include-hidden --drop-reason --json",
+                "counters --type drop --json",
                 out string countersError,
                 out int countersCode,
                 15000,
                 cancellationToken);
             var countersText = new StringBuilder();
+            countersText.AppendLine($"CountersResetAtCaptureStart: {countersReset}");
+            countersText.AppendLine(countersReset
+                ? "Interpretation: counters represent drops accumulated during this capture window."
+                : "Interpretation: pktmon reset failed; counters may include values accumulated before this capture.");
             countersText.AppendLine($"ExitCode: {countersCode}");
             if (!string.IsNullOrWhiteSpace(counters))
                 countersText.AppendLine(counters.TrimEnd());
@@ -1786,7 +2315,9 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 countersText.AppendLine("=== STDERR / ERROR ===");
                 countersText.AppendLine(countersError.TrimEnd());
             }
-            WriteText(root, "11-packet-capture/pktmon-drop-counters.json.txt", countersText.ToString());
+            WriteText(root, "11-packet-capture/pktmon-drop-counters-window.json.txt", countersText.ToString());
+            if (countersCode != 0)
+                captureWarnings.Add("PktMon drop counters 查询失败。");
         }
         finally
         {
@@ -1796,6 +2327,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             log.AppendLine(stopOutput);
             log.AppendLine(stopError);
             log.AppendLine($"stop exit={stopCode}");
+            if (stopCode != 0)
+                captureWarnings.Add("PktMon stop 返回失败，ETL 可能不完整。");
         }
 
         if (File.Exists(etl))
@@ -1806,6 +2339,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             log.AppendLine(conv);
             log.AppendLine(convErr);
             log.AppendLine($"exit={convCode}");
+            if (convCode != 0)
+                captureWarnings.Add("PktMon etl2txt 转换失败。");
 
             string pcapArgs = $"etl2pcap \"{etl}\" --out \"{pcapng}\"";
             string pcap = ProcessRunner.RunNative(pktmonExe, pcapArgs, out string pcapErr, out int pcapCode, 30000, cancellationToken);
@@ -1813,18 +2348,23 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             log.AppendLine(pcap);
             log.AppendLine(pcapErr);
             log.AppendLine($"exit={pcapCode}");
+            if (pcapCode != 0)
+                captureWarnings.Add("PktMon etl2pcap 转换失败；ETL 原始文件仍保留。");
         }
 
         sw.Stop();
         WriteText(root, "11-packet-capture/pktmon-control.txt", log.ToString());
+        bool etlExists = File.Exists(etl);
         return new DiagnosticStepRecord
         {
             Name = "PktMon 抓包",
             File = "11-packet-capture/pktmon.etl",
-            Status = File.Exists(etl) ? "OK" : "WARN",
-            ExitCode = File.Exists(etl) ? 0 : 1,
+            Status = !etlExists ? "WARN" : captureWarnings.Count > 0 ? "WARN" : "OK",
+            ExitCode = etlExists ? 0 : 1,
             DurationMs = sw.ElapsedMilliseconds,
-            Error = File.Exists(etl) ? "" : "PktMon 未生成 ETL 文件"
+            Error = !etlExists
+                ? "PktMon 未生成 ETL 文件"
+                : string.Join(" ", captureWarnings)
         };
     }
 
@@ -1847,6 +2387,9 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine($"- WinNetManager：{Assembly.GetExecutingAssembly().GetName().Version}");
         sb.AppendLine($"- 管理员权限：{(IsAdministrator() ? "是" : "否（部分系统级采集可能降级）")}");
         sb.AppendLine($"- PktMon 抓包：{(options.IncludePacketCapture ? $"是（{options.PacketCaptureSeconds} 秒）" : "否")}");
+        sb.AppendLine($"- 总时间预算：{options.TotalBudgetSeconds} 秒");
+        if (!string.IsNullOrWhiteSpace(options.CustomTarget))
+            sb.AppendLine($"- 用户指定故障目标：{options.CustomTarget}" + (options.CustomPort.HasValue ? $" / 端口 {options.CustomPort}" : ""));
         sb.AppendLine();
 
         sb.AppendLine("## 自动判读");
@@ -1870,7 +2413,11 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("| 目标 | 类型 | DNS | 收/发 | 丢包 | 平均延迟 |");
         sb.AppendLine("|---|---|---|---:|---:|---:|");
         foreach (var p in pingResults)
-            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {Md(string.IsNullOrWhiteSpace(p.DnsStatus) ? "-" : p.DnsStatus)} | {p.Received}/{p.Sent} | {p.LossPercent:F0}% | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
+        {
+            string loss = double.IsNaN(p.LossPercent) ? "-" : $"{p.LossPercent:F0}%";
+            string sentReceived = p.Sent <= 0 ? "未发送" : $"{p.Received}/{p.Sent}";
+            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {Md(string.IsNullOrWhiteSpace(p.DnsStatus) ? "-" : p.DnsStatus)} | {sentReceived} | {loss} | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
+        }
         sb.AppendLine();
 
         sb.AppendLine("## HTTP / HTTPS 摘要");
@@ -1893,6 +2440,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine();
 
         sb.AppendLine("## 采集步骤");
+        sb.AppendLine("状态说明：OK=成功且有内容；EMPTY=成功但无数据；SKIP=条件不适用而跳过；WARN=有部分结果但存在采集警告；FAIL=采集失败。");
+        sb.AppendLine();
         sb.AppendLine("| 状态 | 项目 | 文件 | 耗时 |");
         sb.AppendLine("|---|---|---|---:|");
         foreach (var r in records)
@@ -1911,14 +2460,35 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     {
         var manifest = new
         {
-            schema = 1,
+            schema = 2,
             generated_at = started,
+            completed_at = DateTimeOffset.Now,
+            total_duration_ms = (long)(DateTimeOffset.Now - started).TotalMilliseconds,
             computer_name = Environment.MachineName,
+            os_version = Environment.OSVersion.VersionString,
             app_version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
             elevated = IsAdministrator(),
             packet_capture = options.IncludePacketCapture,
             packet_capture_seconds = options.PacketCaptureSeconds,
-            steps = records
+            total_budget_seconds = options.TotalBudgetSeconds,
+            custom_target = string.IsNullOrWhiteSpace(options.CustomTarget) ? null : options.CustomTarget,
+            custom_port = options.CustomPort,
+            steps = records.Select(r =>
+            {
+                var metrics = GetArtifactMetrics(root, r.File);
+                return new
+                {
+                    r.Name,
+                    r.File,
+                    r.Status,
+                    r.ExitCode,
+                    r.DurationMs,
+                    r.PowerShellErrorCount,
+                    r.Error,
+                    file_bytes = metrics.Bytes,
+                    file_lines = metrics.Lines
+                };
+            }).ToList()
         };
 
         WriteText(root, "manifest.json", JsonSerializer.Serialize(manifest, new JsonSerializerOptions
@@ -1934,7 +2504,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("============================");
         sb.AppendLine();
         sb.AppendLine("用途：在无法远程连接目标电脑时，一次性采集网络故障定位所需的本机状态与链路证据。");
-        sb.AppendLine("此模式默认只读，不修改 DNS、IP、路由、防火墙，不重启网卡和服务。");
+        sb.AppendLine("此模式默认只读，不修改 DNS、IP、路由、防火墙，不重启网卡和服务；默认总时间预算 180 秒，可随时取消。");
         sb.AppendLine();
         sb.AppendLine("主要内容：");
         sb.AppendLine("- Windows / 更新 / 时间同步");
@@ -1943,10 +2513,11 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("- DNS、NRPT、Hosts、系统解析与逐 DNS 服务器解析测试");
         sb.AppendLine("- 网关/公共 IPv4/IPv6/常用域名 Ping 与丢包");
         sb.AppendLine("- HTTP/HTTPS 直连与系统代理路径");
-        sb.AppendLine("- 条件化并发 Traceroute、TCP 动态/排除端口范围、连接表、监听端点");
+        sb.AppendLine("- IPv4/IPv6 条件化并发 Traceroute；如界面填写了目标/端口，还会额外测试该故障目标的 DNS/Ping/TCP/HTTP/Traceroute");
+        sb.AppendLine("- TCP 动态/排除端口范围、连接表、监听端点");
         sb.AppendLine("- WinINET/PAC、VPN、网络接管软件、Winsock、完整 WFP state/filters、驱动线索");
-        sb.AppendLine("- 防火墙配置与启用规则");
-        sb.AppendLine("- DHCP 租约注册表、DHCP trace、最近 48 小时 DHCP/DNS/WLAN/网络/IP 冲突事件");
+        sb.AppendLine("- 防火墙配置、启用规则、阻止规则的地址/端口/程序过滤条件，以及 WFP/Firewall 事件");
+        sb.AppendLine("- DHCP 租约注册表、DHCP trace、最近 48 小时 DHCP/DNS/NLA/WLAN/802.1X/WFP/网络/IP 冲突事件");
         sb.AppendLine("- 5 秒网卡流量/错误/丢弃/非单播采样，用于发现拥塞或疑似广播风暴");
         sb.AppendLine(options.IncludePacketCapture
             ? $"- 额外包含 {options.PacketCaptureSeconds} 秒 PktMon 抓包（128 字节截断）。"
@@ -1955,6 +2526,37 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("隐私：包内可能出现 IP、MAC、SSID/BSSID、代理/VPN 服务器、进程名、应用路径、SID、活动连接和网络事件。");
         sb.AppendLine("WFP XML 与事件日志可能包含本机应用路径或安全主体信息。PktMon 的 128 字节截断仍可能包含 DNS 查询名、TLS SNI、HTTP 请求头片段、端口和 IP/MAC。不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码、文档内容或环境变量；DNS Cache 默认不采集。");
         WriteText(root, "README.txt", sb.ToString());
+    }
+
+    private static (long? Bytes, long? Lines) GetArtifactMetrics(string root, string relative)
+    {
+        try
+        {
+            string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(path))
+                return (null, null);
+
+            long bytes = new FileInfo(path).Length;
+            string ext = Path.GetExtension(path);
+            bool textLike = ext.Equals(".txt", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".csv", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".tsv", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".json", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".md", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".xml", StringComparison.OrdinalIgnoreCase);
+            if (!textLike)
+                return (bytes, null);
+
+            long lines = 0;
+            using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            while (reader.ReadLine() != null)
+                lines++;
+            return (bytes, lines);
+        }
+        catch
+        {
+            return (null, null);
+        }
     }
 
     private static void PreflightDiskSpace(string workDir, string zipPath, bool includesCapture)

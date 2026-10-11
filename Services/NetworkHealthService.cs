@@ -957,10 +957,7 @@ public static class NetworkHealthService
                     .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
                     .ToList();
                 var ipv6Global = props.UnicastAddresses
-                    .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
-                                && !a.Address.IsIPv6LinkLocal
-                                && !a.Address.IsIPv6SiteLocal
-                                && !System.Net.IPAddress.IsLoopback(a.Address))
+                    .Where(a => DiagnosticBundleService.IsGlobalUnicastIpv6(a.Address))
                     .ToList();
 
                 if (ipv4Addrs.Count == 0)

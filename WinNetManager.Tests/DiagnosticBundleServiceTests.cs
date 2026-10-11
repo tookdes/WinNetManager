@@ -5,6 +5,51 @@ namespace WinNetManager.Tests;
 
 public class DiagnosticBundleServiceTests
 {
+    [Theory]
+    [InlineData(0, "", "", 0, "EMPTY")]
+    [InlineData(0, "", "some output", 0, "OK")]
+    [InlineData(0, "", "partial output", 1, "WARN")]
+    [InlineData(1, "", "", 0, "FAIL")]
+    [InlineData(0, "stderr", "partial output", 0, "WARN")]
+    public void ClassifyStep_DistinguishesEmptyWarningAndFailure(
+        int exitCode,
+        string error,
+        string output,
+        int psErrors,
+        string expected)
+    {
+        Assert.Equal(expected,
+            DiagnosticBundleService.ClassifyStep(exitCode, error, output, psErrors));
+    }
+
+    [Theory]
+    [InlineData("2400:3200::1", true)]
+    [InlineData("2606:4700:4700::1111", true)]
+    [InlineData("fc00::1", false)]
+    [InlineData("fd12:3456::1", false)]
+    [InlineData("fe80::1", false)]
+    [InlineData("::1", false)]
+    public void IsGlobalUnicastIpv6_ExcludesUlaAndLinkLocal(string address, bool expected)
+    {
+        Assert.Equal(expected,
+            DiagnosticBundleService.IsGlobalUnicastIpv6(System.Net.IPAddress.Parse(address)));
+    }
+
+    [Fact]
+    public void PingProbe_NoPacketsSent_HasUnknownLoss()
+    {
+        var probe = new PingProbeResult
+        {
+            Target = "unresolved.example",
+            Kind = "Domain / Test",
+            Sent = 0,
+            Received = 0,
+            DnsStatus = "Timeout"
+        };
+
+        Assert.True(double.IsNaN(probe.LossPercent));
+    }
+
     [Fact]
     public void AnalyzeConnectivity_DoesNotClaimGatewayReachable_WhenNoGatewayExists()
     {
