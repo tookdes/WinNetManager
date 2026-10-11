@@ -234,13 +234,20 @@ public static class ProcessRunner
 
         if (!raw.Contains("<Objs")) return raw;
 
-        // Try regex extract Error nodes directly (fast and namespace-agnostic)
-        var matches = Regex.Matches(raw, @"<S\s+S=""Error"">([^<]+)</S>");
+        // Extract both Error and Warning records. Warnings can explain why an
+        // otherwise-successful collector is incomplete (disabled log channel, unsupported provider, etc.).
+        var matches = Regex.Matches(raw, @"<S\s+S=""(Error|Warning)"">([^<]+)</S>");
         if (matches.Count > 0)
         {
             var sb = new StringBuilder();
             foreach (Match m in matches)
-                sb.AppendLine(DecodeCliXmlChars(m.Groups[1].Value));
+            {
+                string kind = m.Groups[1].Value;
+                string message = DecodeCliXmlChars(m.Groups[2].Value);
+                sb.AppendLine(kind.Equals("Warning", StringComparison.OrdinalIgnoreCase)
+                    ? $"WARNING: {message}"
+                    : message);
+            }
             return sb.ToString().Trim();
         }
 
@@ -252,13 +259,16 @@ public static class ProcessRunner
             var sb = new StringBuilder();
             var nsmgr = new XmlNamespaceManager(doc.NameTable);
             nsmgr.AddNamespace("ps", "http://schemas.microsoft.com/powershell/2004/04");
-            var nodes = doc.SelectNodes("//ps:S[@S='Error']", nsmgr);
+            var nodes = doc.SelectNodes("//ps:S[@S='Error' or @S='Warning']", nsmgr);
             if (nodes != null)
             {
                 foreach (XmlNode node in nodes)
                 {
-                    string text = node.InnerText ?? "";
-                    sb.AppendLine(DecodeCliXmlChars(text));
+                    string text = DecodeCliXmlChars(node.InnerText ?? "");
+                    string? kind = node.Attributes?["S"]?.Value;
+                    sb.AppendLine(string.Equals(kind, "Warning", StringComparison.OrdinalIgnoreCase)
+                        ? $"WARNING: {text}"
+                        : text);
                 }
             }
             if (sb.Length > 0) return sb.ToString().Trim();
