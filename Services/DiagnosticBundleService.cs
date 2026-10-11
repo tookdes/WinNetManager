@@ -1458,6 +1458,24 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         try
         {
             Thread.Sleep(TimeSpan.FromSeconds(seconds));
+
+            string counters = ProcessRunner.RunNative(
+                pktmonExe,
+                "counters --type drop --include-hidden --drop-reason --json",
+                out string countersError,
+                out int countersCode,
+                15000);
+            var countersText = new StringBuilder();
+            countersText.AppendLine($"ExitCode: {countersCode}");
+            if (!string.IsNullOrWhiteSpace(counters))
+                countersText.AppendLine(counters.TrimEnd());
+            if (!string.IsNullOrWhiteSpace(countersError))
+            {
+                countersText.AppendLine();
+                countersText.AppendLine("=== STDERR / ERROR ===");
+                countersText.AppendLine(countersError.TrimEnd());
+            }
+            WriteText(root, "11-packet-capture/pktmon-drop-counters.json.txt", countersText.ToString());
         }
         finally
         {
