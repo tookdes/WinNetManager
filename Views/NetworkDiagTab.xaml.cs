@@ -29,6 +29,7 @@ public partial class NetworkDiagTab : UserControl
         {
             ChkPacketCapture.IsChecked = false;
             ChkPacketCapture.IsEnabled = false;
+            CmbPacketCaptureSeconds.IsEnabled = false;
             ChkPacketCapture.ToolTip = "当前进程不是管理员权限，PktMon 抓包不可用。";
         }
 
@@ -259,7 +260,10 @@ public partial class NetworkDiagTab : UserControl
         TxtPort.IsEnabled = !busy;
 
         if (DiagnosticBundleService.IsElevated)
+        {
             ChkPacketCapture.IsEnabled = !busy;
+            CmbPacketCaptureSeconds.IsEnabled = !busy;
+        }
 
         BtnCancelDiagnostic.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         BtnCancelDiagnostic.IsEnabled = busy;
@@ -296,11 +300,22 @@ public partial class NetworkDiagTab : UserControl
         if (save.ShowDialog(owner) != true)
             return;
 
+        int captureSeconds = 10;
+        if (CmbPacketCaptureSeconds.SelectedItem is ComboBoxItem captureItem &&
+            int.TryParse(captureItem.Tag?.ToString(), out int selectedSeconds))
+            captureSeconds = Math.Clamp(selectedSeconds, 10, 60);
+
+        string customTarget = TxtTarget.Text?.Trim() ?? "";
+        int? customPort = int.TryParse(TxtPort.Text?.Trim(), out int parsedPort) &&
+                          parsedPort is >= 1 and <= 65535
+            ? parsedPort
+            : null;
+
         bool includeCapture = ChkPacketCapture.IsChecked == true;
         if (includeCapture)
         {
             var confirm = MessageBox.Show(
-                "PktMon 将抓取约 10 秒网络数据（每包截取前 128 字节）。\n\n" +
+                $"PktMon 将抓取约 {captureSeconds} 秒网络数据（每包截取前 128 字节）。\n\n" +
                 "它有助于分析 ARP/广播风暴和异常流量，但截断内容仍可能包含 DNS 查询名、TLS SNI、HTTP 请求头片段、端口和 IP/MAC。\n" +
                 "确定要把抓包文件一起放进诊断包吗？",
                 "确认附带抓包",
@@ -323,7 +338,9 @@ public partial class NetworkDiagTab : UserControl
                 new DiagnosticBundleOptions
                 {
                     IncludePacketCapture = includeCapture,
-                    PacketCaptureSeconds = 10
+                    PacketCaptureSeconds = captureSeconds,
+                    CustomTarget = customTarget,
+                    CustomPort = customPort
                 },
                 progress,
                 cts.Token));
