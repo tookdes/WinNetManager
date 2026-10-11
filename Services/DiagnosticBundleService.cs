@@ -173,6 +173,13 @@ public static class DiagnosticBundleService
                 if (IsStepError(record.Status)) errorCount++;
             }
 
+            progress?.Report("按系统能力收集 Wi-Fi / 802.1X / WWAN 状态...");
+            foreach (var record in RunCapabilityDependentAdapterSteps(workDir, cancellationToken))
+            {
+                records.Add(record);
+                if (IsStepError(record.Status)) errorCount++;
+            }
+
             progress?.Report("导出 Windows Filtering Platform (WFP) 状态...");
             foreach (var record in CollectWfpSnapshot(workDir, cancellationToken))
             {
@@ -910,14 +917,6 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             ("02-adapters/netsh-ipv4-config.txt", "收集 netsh IPv4 配置", "netsh.exe", "interface ipv4 show config", 15000),
             ("02-adapters/netsh-ipv6-interfaces.txt", "收集 netsh IPv6 接口", "netsh.exe", "interface ipv6 show interfaces", 15000),
             ("03-routing/netsh-ipv6-routes.txt", "收集 netsh IPv6 路由", "netsh.exe", "interface ipv6 show route", 15000),
-            ("02-adapters/wlan-interfaces.txt", "收集当前 Wi-Fi 连接", "netsh.exe", "wlan show interfaces", 15000),
-            ("02-adapters/wlan-drivers.txt", "收集 Wi-Fi 驱动能力", "netsh.exe", "wlan show drivers", 15000),
-            ("02-adapters/wlan-settings.txt", "收集 Wi-Fi 全局设置", "netsh.exe", "wlan show settings", 10000),
-            ("02-adapters/wlan-profiles.txt", "列出 Wi-Fi 配置文件（不含密钥）", "netsh.exe", "wlan show profiles", 10000),
-            ("02-adapters/lan-interfaces.txt", "收集有线 802.1X 接口状态", "netsh.exe", "lan show interfaces", 10000),
-            ("02-adapters/lan-settings.txt", "收集有线 802.1X 全局设置", "netsh.exe", "lan show settings", 10000),
-            ("02-adapters/lan-profiles.txt", "列出有线 802.1X 配置文件", "netsh.exe", "lan show profiles", 10000),
-            ("02-adapters/mbn-interfaces.txt", "收集蜂窝/WWAN 接口", "netsh.exe", "mbn show interfaces", 10000),
             ("02-adapters/tcp-global.txt", "收集 netsh TCP 全局设置", "netsh.exe", "interface tcp show global", 15000),
             ("02-adapters/ipv6-prefix-policies.txt", "收集 IPv6 前缀优先级策略", "netsh.exe", "interface ipv6 show prefixpolicies", 15000),
             ("02-adapters/teredo-state.txt", "收集 Teredo 状态", "netsh.exe", "interface teredo show state", 10000),
@@ -989,6 +988,96 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             DurationMs = sw.ElapsedMilliseconds,
             Error = error
         };
+    }
+
+    private static List<DiagnosticStepRecord> RunCapabilityDependentAdapterSteps(
+        string root,
+        CancellationToken cancellationToken)
+    {
+        var records = new List<DiagnosticStepRecord>();
+        var states = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        string stateOutput = ProcessRunner.RunPowerShell(
+            "Get-Service -Name WlanSvc,dot3svc,WwanSvc -ErrorAction SilentlyContinue | " +
+            "Select-Object Name,Status | ConvertTo-Csv -NoTypeInformation",
+            out string stateError,
+            out int stateExit,
+            10000,
+            cancellationToken);
+
+        if (stateExit == 0 && string.IsNullOrWhiteSpace(stateError))
+        {
+            var lines = stateOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 1; i < lines.Length; i++)
+            {
+                var parts = CsvParser.ParseLine(lines[i]);
+                if (parts.Length >= 2)
+                    states[parts[0].Trim()] = parts[1].Trim();
+            }
+        }
+
+        bool StateKnown(string service) => states.ContainsKey(service);
+        bool Running(string service) =>
+            states.TryGetValue(service, out string? status) &&
+            status.Equals("Running", StringComparison.OrdinalIgnoreCase);
+
+        void SkipGroup(string relative, string name, string service)
+        {
+            string reason = StateKnown(service)
+                ? $"{service} 未运行，相关 netsh 上下文会产生无意义的 exit 1，因此已条件跳过。"
+                : $"{service} 状态无法确认；为避免把缺失功能误报为网络故障，已条件跳过。";
+            WriteText(root, relative, reason);
+            records.Add(new DiagnosticStepRecord
+            {
+                Name = name,
+                File = relative,
+                Status = "SKIP",
+                ExitCode = 0,
+                Error = reason
+            });
+        }
+
+        if (Running("WlanSvc"))
+        {
+            records.Add(RunNativeStep(root, "02-adapters/wlan-interfaces.txt", "收集当前 Wi-Fi 连接",
+                "netsh.exe", "wlan show interfaces", 15000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/wlan-drivers.txt", "收集 Wi-Fi 驱动能力",
+                "netsh.exe", "wlan show drivers", 15000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/wlan-settings.txt", "收集 Wi-Fi 全局设置",
+                "netsh.exe", "wlan show settings", 10000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/wlan-profiles.txt", "列出 Wi-Fi 配置文件（不含密钥）",
+                "netsh.exe", "wlan show profiles", 10000, cancellationToken));
+        }
+        else
+        {
+            SkipGroup("02-adapters/wlan-skipped.txt", "Wi-Fi netsh 采集", "WlanSvc");
+        }
+
+        if (Running("dot3svc"))
+        {
+            records.Add(RunNativeStep(root, "02-adapters/lan-interfaces.txt", "收集有线 802.1X 接口状态",
+                "netsh.exe", "lan show interfaces", 10000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/lan-settings.txt", "收集有线 802.1X 全局设置",
+                "netsh.exe", "lan show settings", 10000, cancellationToken));
+            records.Add(RunNativeStep(root, "02-adapters/lan-profiles.txt", "列出有线 802.1X 配置文件",
+                "netsh.exe", "lan show profiles", 10000, cancellationToken));
+        }
+        else
+        {
+            SkipGroup("02-adapters/lan-skipped.txt", "有线 802.1X netsh 采集", "dot3svc");
+        }
+
+        if (Running("WwanSvc"))
+        {
+            records.Add(RunNativeStep(root, "02-adapters/mbn-interfaces.txt", "收集蜂窝/WWAN 接口",
+                "netsh.exe", "mbn show interfaces", 10000, cancellationToken));
+        }
+        else
+        {
+            SkipGroup("02-adapters/mbn-skipped.txt", "WWAN/MBN netsh 采集", "WwanSvc");
+        }
+
+        return records;
     }
 
     private static List<DiagnosticStepRecord> CollectWfpSnapshot(string root, CancellationToken cancellationToken)
