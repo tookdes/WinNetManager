@@ -1524,11 +1524,17 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var results = Task.WhenAll(pingTasks).GetAwaiter().GetResult().ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine("Target\tKind\tResolvedAddress\tDnsStatus\tSent\tReceived\tLoss%\tMinMs\tAvgMs\tMaxMs\tError");
+        sb.AppendLine("Target\tKind\tResolvedAddress\tDnsStatus\tRouteSource\tRouteInterfaceIndex\tRouteInterface\tNextHop\tRoutePrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tSent\tReceived\tLoss%\tMinMs\tAvgMs\tMaxMs\tError");
         foreach (var r in results)
         {
             string loss = double.IsNaN(r.LossPercent) ? "" : r.LossPercent.ToString("F1");
-            sb.AppendLine($"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{EscapeTsv(r.DnsStatus)}\t{r.Sent}\t{r.Received}\t{loss}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
+            var route = r.Route;
+            sb.AppendLine(
+                $"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{EscapeTsv(r.DnsStatus)}\t" +
+                $"{EscapeTsv(route?.BestSourceAddress ?? "")}\t{(route?.InterfaceIndex.ToString() ?? "")}\t{EscapeTsv(route?.InterfaceName ?? "")}\t" +
+                $"{EscapeTsv(route?.NextHop ?? "")}\t{EscapeTsv(route?.DestinationPrefix ?? "")}\t{(route?.Success == true ? route.RouteMetric.ToString() : "")}\t" +
+                $"{(route?.InterfaceMetric?.ToString() ?? "")}\t{(route?.EffectiveMetric?.ToString() ?? "")}\t" +
+                $"{r.Sent}\t{r.Received}\t{loss}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
         }
         WriteText(root, "05-connectivity/ping-tests.tsv", sb.ToString());
 
@@ -1584,6 +1590,22 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             else
             {
                 result.ResolvedAddress = target;
+            }
+
+            if (IPAddress.TryParse(address, out var routeDestination))
+            {
+                try { result.Route = RouteSelectionService.Lookup(routeDestination); }
+                catch (Exception ex)
+                {
+                    result.Route = new RouteSelectionInfo
+                    {
+                        Success = false,
+                        LookupStage = "managed wrapper",
+                        Error = ex.Message,
+                        Destination = routeDestination.ToString(),
+                        AddressFamily = routeDestination.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6"
+                    };
+                }
             }
 
             result.Sent = count;
