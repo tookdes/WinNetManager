@@ -1841,10 +1841,26 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         bool tcpAttempted = endpointAddress != null;
         bool tcpConnected = false;
         string tcpDetail = "";
+        string tcpLocalEndpoint = "";
+        string tcpRemoteEndpoint = "";
+        RouteSelectionInfo? tcpRoute = null;
         long tcpMs = 0;
 
         if (endpointAddress != null)
         {
+            try { tcpRoute = RouteSelectionService.Lookup(endpointAddress); }
+            catch (Exception ex)
+            {
+                tcpRoute = new RouteSelectionInfo
+                {
+                    Success = false,
+                    LookupStage = "managed wrapper",
+                    Error = ex.Message,
+                    Destination = endpointAddress.ToString(),
+                    AddressFamily = endpointAddress.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6"
+                };
+            }
+
             var tcpSw = Stopwatch.StartNew();
             try
             {
@@ -1853,6 +1869,10 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 timeoutCts.CancelAfter(TimeSpan.FromSeconds(4));
                 tcp.ConnectAsync(endpointAddress, port, timeoutCts.Token).AsTask().GetAwaiter().GetResult();
                 tcpConnected = tcp.Connected;
+                if (tcp.Client.LocalEndPoint is IPEndPoint local)
+                    tcpLocalEndpoint = local.ToString();
+                if (tcp.Client.RemoteEndPoint is IPEndPoint remote)
+                    tcpRemoteEndpoint = remote.ToString();
                 tcpDetail = tcpConnected ? "Connected" : "Connect returned without an established socket";
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1905,15 +1925,26 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine($"TCP attempted: {tcpAttempted}");
         sb.AppendLine($"TCP endpoint: {(endpointAddress == null ? "-" : endpointAddress.ToString())}:{port}");
         sb.AppendLine($"TCP connected: {tcpConnected}");
+        sb.AppendLine($"TCP actual local endpoint: {(string.IsNullOrWhiteSpace(tcpLocalEndpoint) ? "-" : tcpLocalEndpoint)}");
+        sb.AppendLine($"TCP actual remote endpoint: {(string.IsNullOrWhiteSpace(tcpRemoteEndpoint) ? "-" : tcpRemoteEndpoint)}");
         sb.AppendLine($"TCP duration: {tcpMs} ms");
         sb.AppendLine($"TCP detail: {tcpDetail}");
+        AppendRouteSelection(sb, "TCP route lookup", tcpRoute);
         if (url != null)
         {
             sb.AppendLine($"URL: {url}");
             if (customDirect != null)
+            {
                 sb.AppendLine($"HTTP direct: response={customDirect.ResponseReceived}, status={customDirect.StatusCode}, success={customDirect.Success}, detail={customDirect.Detail}");
+                sb.AppendLine($"HTTP direct transport: {customDirect.TransportLocalEndpoint} -> {customDirect.TransportRemoteEndpoint}");
+                AppendRouteSelection(sb, "HTTP direct transport route", customDirect.Route);
+            }
             if (customProxy != null)
+            {
                 sb.AppendLine($"HTTP system-proxy: response={customProxy.ResponseReceived}, status={customProxy.StatusCode}, success={customProxy.Success}, detail={customProxy.Detail}");
+                sb.AppendLine($"HTTP system-proxy transport: {customProxy.TransportLocalEndpoint} -> {customProxy.TransportRemoteEndpoint}");
+                AppendRouteSelection(sb, "HTTP proxy/default transport route", customProxy.Route);
+            }
         }
 
         WriteText(root, "05-connectivity/custom-target.txt", sb.ToString());
@@ -1968,6 +1999,30 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             cancellationToken));
 
         return records;
+    }
+
+    private static void AppendRouteSelection(StringBuilder sb, string label, RouteSelectionInfo? route)
+    {
+        sb.AppendLine($"=== {label} ===");
+        if (route == null)
+        {
+            sb.AppendLine("Route lookup: unavailable");
+            return;
+        }
+
+        sb.AppendLine($"Route lookup success: {route.Success}");
+        sb.AppendLine($"Destination: {route.Destination}");
+        sb.AppendLine($"Best source: {route.BestSourceAddress}");
+        sb.AppendLine($"Interface: {route.InterfaceDisplay}");
+        if (!string.IsNullOrWhiteSpace(route.InterfaceDescription))
+            sb.AppendLine($"Interface description: {route.InterfaceDescription}");
+        sb.AppendLine($"Next hop: {(string.IsNullOrWhiteSpace(route.NextHop) ? "on-link / unspecified" : route.NextHop)}");
+        sb.AppendLine($"Destination prefix: {route.DestinationPrefix}");
+        sb.AppendLine($"Route metric: {(route.Success ? route.RouteMetric.ToString() : "-")}");
+        sb.AppendLine($"Interface metric: {(route.InterfaceMetric?.ToString() ?? "-")}");
+        sb.AppendLine($"Effective metric: {(route.EffectiveMetric?.ToString() ?? "-")}");
+        if (!string.IsNullOrWhiteSpace(route.Error))
+            sb.AppendLine($"Route lookup note/error: {route.Error}");
     }
 
     private static IPAddress[] ResolveHostWithTimeout(string host, int timeoutMs, CancellationToken cancellationToken = default)
