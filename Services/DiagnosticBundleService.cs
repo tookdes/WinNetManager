@@ -242,6 +242,17 @@ public static class DiagnosticBundleService
                 errorCount++;
             }
 
+            if (!string.IsNullOrWhiteSpace(options.CustomTarget))
+            {
+                progress?.Report($"测试用户指定故障目标：{options.CustomTarget}...");
+                foreach (var record in RunCustomTargetDiagnostics(
+                    workDir, options, pingResults, httpResults, findings, ref warningCount, cancellationToken))
+                {
+                    records.Add(record);
+                    if (IsStepError(record.Status)) errorCount++;
+                }
+            }
+
             progress?.Report("检查近期 IP 冲突与网络事件...");
             try
             {
@@ -1554,6 +1565,181 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             r.DurationMs = sw.ElapsedMilliseconds;
         }
         return r;
+    }
+
+    private static List<DiagnosticStepRecord> RunCustomTargetDiagnostics(
+        string root,
+        DiagnosticBundleOptions options,
+        List<PingProbeResult> pingResults,
+        List<HttpProbeResult> httpResults,
+        List<string> findings,
+        ref int warningCount,
+        CancellationToken cancellationToken)
+    {
+        var records = new List<DiagnosticStepRecord>();
+        string raw = (options.CustomTarget ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+            return records;
+
+        string host = raw;
+        int port = options.CustomPort is > 0 and <= 65535 ? options.CustomPort.Value : 443;
+        string? url = null;
+
+        if (Uri.TryCreate(raw, UriKind.Absolute, out var uri) &&
+            (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+             uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+        {
+            host = uri.Host;
+            port = uri.IsDefaultPort
+                ? (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ? 443 : 80)
+                : uri.Port;
+            url = uri.ToString();
+        }
+        else if (host.StartsWith("[", StringComparison.Ordinal) &&
+                 host.EndsWith("]", StringComparison.Ordinal))
+        {
+            host = host[1..^1];
+        }
+
+        var sw = Stopwatch.StartNew();
+        var ping = PingTarget(host, "Custom target", 3, 900, cancellationToken);
+        pingResults.Add(ping);
+
+        IPAddress? endpointAddress = null;
+        if (IPAddress.TryParse(host, out var literal))
+        {
+            endpointAddress = literal;
+        }
+        else if (!string.IsNullOrWhiteSpace(ping.ResolvedAddress))
+        {
+            endpointAddress = ping.ResolvedAddress
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => IPAddress.TryParse(s.Trim(), out var ip) ? ip : null)
+                .FirstOrDefault(ip => ip != null);
+        }
+
+        bool tcpAttempted = endpointAddress != null;
+        bool tcpConnected = false;
+        string tcpDetail = "";
+        long tcpMs = 0;
+
+        if (endpointAddress != null)
+        {
+            var tcpSw = Stopwatch.StartNew();
+            try
+            {
+                using var tcp = new TcpClient(endpointAddress.AddressFamily);
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(4));
+                tcp.ConnectAsync(endpointAddress, port, timeoutCts.Token).AsTask().GetAwaiter().GetResult();
+                tcpConnected = tcp.Connected;
+                tcpDetail = tcpConnected ? "Connected" : "Connect returned without an established socket";
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                tcpDetail = "TCP connect timed out after 4 seconds";
+            }
+            catch (Exception ex)
+            {
+                tcpDetail = ex.GetBaseException().Message;
+            }
+            finally
+            {
+                tcpSw.Stop();
+                tcpMs = tcpSw.ElapsedMilliseconds;
+            }
+        }
+        else
+        {
+            tcpDetail = "Skipped because the target did not resolve to an IP address.";
+        }
+
+        if (url != null)
+        {
+            var direct = HttpProbe(url, useProxy: false, cancellationToken);
+            var proxied = HttpProbe(url, useProxy: true, cancellationToken);
+            httpResults.Add(direct);
+            httpResults.Add(proxied);
+
+            if (!direct.ResponseReceived && !proxied.ResponseReceived && tcpConnected)
+            {
+                findings.Add($"[警告] 用户指定目标 {host}:{port} TCP 可连接，但 URL {url} 的直连和系统代理 HTTP(S) 均未收到响应：重点检查 TLS、HTTP、SNI、证书或应用层过滤。");
+                warningCount++;
+            }
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("# 用户指定故障目标");
+        sb.AppendLine($"Input: {raw}");
+        sb.AppendLine($"Host: {host}");
+        sb.AppendLine($"Port: {port}");
+        sb.AppendLine($"DNS status: {(string.IsNullOrWhiteSpace(ping.DnsStatus) ? "literal IP / not required" : ping.DnsStatus)}");
+        sb.AppendLine($"Resolved addresses: {ping.ResolvedAddress}");
+        sb.AppendLine($"Ping: {(ping.Sent <= 0 ? "not sent" : $"{ping.Received}/{ping.Sent}, loss {(double.IsNaN(ping.LossPercent) ? "unknown" : $"{ping.LossPercent:F0}%")}")}");
+        sb.AppendLine($"TCP attempted: {tcpAttempted}");
+        sb.AppendLine($"TCP endpoint: {(endpointAddress == null ? "-" : endpointAddress.ToString())}:{port}");
+        sb.AppendLine($"TCP connected: {tcpConnected}");
+        sb.AppendLine($"TCP duration: {tcpMs} ms");
+        sb.AppendLine($"TCP detail: {tcpDetail}");
+        if (url != null)
+            sb.AppendLine($"URL: {url}");
+
+        WriteText(root, "05-connectivity/custom-target.txt", sb.ToString());
+        sw.Stop();
+
+        records.Add(new DiagnosticStepRecord
+        {
+            Name = "用户指定目标 DNS/Ping/TCP/HTTP 探测",
+            File = "05-connectivity/custom-target.txt",
+            Status = "OK",
+            ExitCode = 0,
+            DurationMs = sw.ElapsedMilliseconds
+        });
+
+        if (endpointAddress == null)
+        {
+            string reason = ping.DnsStatus == "Timeout" ? "DNS 解析超时" : "未获得可用 IP 地址";
+            findings.Add($"[警告] 用户指定目标 {raw}：{reason}，因此未执行 TCP/Traceroute。");
+            warningCount++;
+
+            WriteText(root, "05-connectivity/custom-target-traceroute-skipped.txt",
+                $"Skipped: {reason}. Input={raw}");
+            records.Add(new DiagnosticStepRecord
+            {
+                Name = "用户指定目标 Traceroute",
+                File = "05-connectivity/custom-target-traceroute-skipped.txt",
+                Status = "SKIP",
+                ExitCode = 0,
+                Error = reason
+            });
+            return records;
+        }
+
+        if (!tcpConnected)
+        {
+            findings.Add($"[警告] 用户指定目标 {host} ({endpointAddress}):{port} TCP 连接失败：{tcpDetail}");
+            warningCount++;
+        }
+        else
+        {
+            findings.Add($"[提示] 用户指定目标 {host} ({endpointAddress}):{port} TCP 可连接（{tcpMs} ms）。");
+        }
+
+        string familyArg = endpointAddress.AddressFamily == AddressFamily.InterNetworkV6 ? "-6" : "-4";
+        records.Add(RunNativeStep(
+            root,
+            "05-connectivity/custom-target-traceroute.txt",
+            $"用户指定目标 Traceroute {endpointAddress}",
+            "tracert.exe",
+            $"{familyArg} -d -h 12 -w 400 {endpointAddress}",
+            20000,
+            cancellationToken));
+
+        return records;
     }
 
     private static IPAddress[] ResolveHostWithTimeout(string host, int timeoutMs, CancellationToken cancellationToken = default)
