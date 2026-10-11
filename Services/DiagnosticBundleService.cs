@@ -605,9 +605,9 @@ $high = $c | Where-Object { $_.LocalPort -ge 49152 }
 "=== Top owning processes ==="
 $c | Group-Object OwningProcess | Sort-Object Count -Descending | Select-Object -First 30 |
   ForEach-Object {
-    $pid = [int]$_.Name
-    $name = try { (Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch { '' }
-    [pscustomobject]@{ PID=$pid; ProcessName=$name; Connections=$_.Count }
+    $ownerPid = [int]$_.Name
+    $name = try { (Get-Process -Id $ownerPid -ErrorAction Stop).ProcessName } catch { '' }
+    [pscustomobject]@{ PID=$ownerPid; ProcessName=$name; Connections=$_.Count }
   } | Format-Table -AutoSize | Out-String -Width 4096
 """, 20000),
 
@@ -1324,7 +1324,9 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         }
 
         bool anyIpv4 = false;
-        bool anyGateway = false;
+        bool anyIpv4Gateway = false;
+        bool anyGlobalIpv6 = false;
+        bool anyIpv6Gateway = false;
         bool anyDns = false;
 
         foreach (var ni in up)
@@ -1338,8 +1340,19 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                     .ToList();
 
                 anyIpv4 |= v4.Count > 0;
-                anyGateway |= props.GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetwork &&
-                                                              !g.Address.Equals(IPAddress.Any));
+                anyIpv4Gateway |= props.GatewayAddresses.Any(g =>
+                    g.Address.AddressFamily == AddressFamily.InterNetwork &&
+                    !g.Address.Equals(IPAddress.Any));
+
+                anyGlobalIpv6 |= props.UnicastAddresses.Any(a =>
+                    a.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
+                    !a.Address.IsIPv6LinkLocal &&
+                    !a.Address.IsIPv6SiteLocal &&
+                    !IPAddress.IsLoopback(a.Address));
+                anyIpv6Gateway |= props.GatewayAddresses.Any(g =>
+                    g.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
+                    !g.Address.Equals(IPAddress.IPv6Any));
+
                 anyDns |= props.DnsAddresses.Count > 0;
 
                 foreach (var ip in v4)
@@ -1357,12 +1370,22 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
         if (!anyIpv4)
         {
-            findings.Add("[警告] 所有活动网卡均没有 IPv4 地址。");
-            warningCount++;
+            if (anyGlobalIpv6)
+            {
+                findings.Add(anyIpv6Gateway
+                    ? "[提示] 当前活动网卡没有 IPv4，但存在全局 IPv6 地址和 IPv6 网关；可能是正常的 IPv6-only / IPv6-first 网络。"
+                    : "[警告] 当前没有 IPv4，虽存在全局 IPv6 地址，但未检测到 IPv6 网关；需检查 IPv6 RA/默认路由。");
+                if (!anyIpv6Gateway) warningCount++;
+            }
+            else
+            {
+                findings.Add("[警告] 所有活动网卡均没有可用 IPv4 或全局 IPv6 地址。");
+                warningCount++;
+            }
         }
-        if (!anyGateway)
+        else if (!anyIpv4Gateway)
         {
-            findings.Add("[警告] 活动网卡没有检测到 IPv4 默认网关。");
+            findings.Add("[警告] 存在 IPv4 地址，但活动网卡没有检测到 IPv4 默认网关。");
             warningCount++;
         }
         if (!anyDns)
