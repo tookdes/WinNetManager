@@ -2076,7 +2076,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     {
         const string relative = "05-connectivity/route-attribution.tsv";
         var sb = new StringBuilder();
-        sb.AppendLine("Probe\tMode\tTarget\tRouteDestination\tActualLocalEndpoint\tActualRemoteEndpoint\tAddressFamily\tRouteLookup\tBestSource\tInterfaceIndex\tInterface\tInterfaceDescription\tNextHop\tDestinationPrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tNote");
+        sb.AppendLine("Probe\tMode\tTarget\tRouteDestination\tActualLocalEndpoint\tActualLocalInterfaceIndex\tActualLocalInterface\tActualRemoteEndpoint\tAddressFamily\tRouteLookup\tBestSource\tRouteInterfaceIndex\tRouteInterface\tRouteInterfaceDescription\tNextHop\tDestinationPrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tNote");
 
         int rows = 0;
 
@@ -2088,7 +2088,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
             rows++;
             sb.AppendLine(
-                $"Ping\t{EscapeTsv(p.Kind)}\t{EscapeTsv(p.Target)}\t{EscapeTsv(r.Destination)}\t\t\t" +
+                $"Ping\t{EscapeTsv(p.Kind)}\t{EscapeTsv(p.Target)}\t{EscapeTsv(r.Destination)}\t\t\t\t\t" +
                 $"{EscapeTsv(r.AddressFamily)}\t{(r.Success ? "OK" : "FAIL")}\t{EscapeTsv(r.BestSourceAddress)}\t{r.InterfaceIndex}\t" +
                 $"{EscapeTsv(r.InterfaceName)}\t{EscapeTsv(r.InterfaceDescription)}\t{EscapeTsv(r.NextHop)}\t{EscapeTsv(r.DestinationPrefix)}\t" +
                 $"{(r.Success ? r.RouteMetric.ToString() : "")}\t{(r.InterfaceMetric?.ToString() ?? "")}\t{(r.EffectiveMetric?.ToString() ?? "")}\t" +
@@ -2111,7 +2111,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
             sb.AppendLine(
                 $"HTTP\t{EscapeTsv(h.Mode)}\t{EscapeTsv(h.Url)}\t{EscapeTsv(r?.Destination ?? "")}\t" +
-                $"{EscapeTsv(h.TransportLocalEndpoint)}\t{EscapeTsv(h.TransportRemoteEndpoint)}\t{EscapeTsv(r?.AddressFamily ?? "")}\t" +
+                $"{EscapeTsv(h.TransportLocalEndpoint)}\t{(h.ActualLocalInterfaceIndex?.ToString() ?? "")}\t{EscapeTsv(h.ActualLocalInterface)}\t{EscapeTsv(h.TransportRemoteEndpoint)}\t{EscapeTsv(r?.AddressFamily ?? "")}\t" +
                 $"{(r == null ? "" : r.Success ? "OK" : "FAIL")}\t{EscapeTsv(r?.BestSourceAddress ?? "")}\t{(r?.InterfaceIndex.ToString() ?? "")}\t" +
                 $"{EscapeTsv(r?.InterfaceName ?? "")}\t{EscapeTsv(r?.InterfaceDescription ?? "")}\t{EscapeTsv(r?.NextHop ?? "")}\t" +
                 $"{EscapeTsv(r?.DestinationPrefix ?? "")}\t{(r?.Success == true ? r.RouteMetric.ToString() : "")}\t" +
@@ -2653,14 +2653,14 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine();
 
         sb.AppendLine("## HTTP / HTTPS 摘要");
-        sb.AppendLine("| 路径 | URL | 实际本地端点 | 实际远端端点 | 出口网卡 | 结果 | 耗时 |");
-        sb.AppendLine("|---|---|---|---|---|---|---:|");
+        sb.AppendLine("| 路径 | URL | 实际本地端点 | 实际源接口 | 实际远端端点 | 路由出口网卡 | 结果 | 耗时 |");
+        sb.AppendLine("|---|---|---|---|---|---|---|---:|");
         foreach (var h in httpResults)
         {
             string result = h.ResponseReceived
                 ? (h.Success ? $"HTTP {h.StatusCode}（正常）" : $"HTTP {h.StatusCode}（有响应但语义异常：{Md(h.Detail)}）")
                 : Md(h.Detail);
-            sb.AppendLine($"| {Md(h.Mode)} | {Md(h.Url)} | {Md(string.IsNullOrWhiteSpace(h.TransportLocalEndpoint) ? "-" : h.TransportLocalEndpoint)} | {Md(string.IsNullOrWhiteSpace(h.TransportRemoteEndpoint) ? "-" : h.TransportRemoteEndpoint)} | {Md(h.Route?.InterfaceDisplay ?? "-")} | {result} | {h.DurationMs} ms |");
+            sb.AppendLine($"| {Md(h.Mode)} | {Md(h.Url)} | {Md(string.IsNullOrWhiteSpace(h.TransportLocalEndpoint) ? "-" : h.TransportLocalEndpoint)} | {Md(string.IsNullOrWhiteSpace(h.ActualLocalInterface) ? "-" : h.ActualLocalInterface)} | {Md(string.IsNullOrWhiteSpace(h.TransportRemoteEndpoint) ? "-" : h.TransportRemoteEndpoint)} | {Md(h.Route?.InterfaceDisplay ?? "-")} | {result} | {h.DurationMs} ms |");
         }
         sb.AppendLine();
 
