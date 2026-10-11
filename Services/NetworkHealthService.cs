@@ -1128,7 +1128,8 @@ public static class NetworkHealthService
     private static bool ServiceExists(string serviceName)
         => _serviceCache.ContainsKey(serviceName);
 
-    // 驱动加载状态缓存 — driverquery 只跑一次，避免每个 TUN/WinDivert 条目单独启动进程
+    // 驱动加载状态缓存 — Win32_SystemDriver 能直接给出驱动服务名与运行状态。
+    // driverquery 不支持 /SVC（/SVC 是 tasklist 参数），因此不要依赖本地化文本列去猜状态。
     private static HashSet<string> _loadedDrivers = new(StringComparer.OrdinalIgnoreCase);
 
     private static void InitDriverCache()
@@ -1136,20 +1137,18 @@ public static class NetworkHealthService
         _loadedDrivers.Clear();
         try
         {
-            string output = ProcessRunner.RunNative("driverquery.exe", "/FO CSV /SVC", out _, 8000);
+            string output = ProcessRunner.RunPowerShell(
+                "Get-CimInstance Win32_SystemDriver -ErrorAction SilentlyContinue | " +
+                "Where-Object { $_.State -eq 'Running' } | " +
+                "Select-Object Name | ConvertTo-Csv -NoTypeInformation",
+                out _, 10000);
+
             var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var line in lines)
+            for (int i = 1; i < lines.Length; i++)
             {
-                if (!line.StartsWith("\"")) continue;
-                var parts = CsvParser.ParseLine(line);
-                if (parts.Length >= 4)
-                {
-                    string svcName = parts[3].Trim();
-                    string state = parts[2].Trim();
-                    if (state.Contains("Running", StringComparison.OrdinalIgnoreCase) ||
-                        state.Contains("正在运行", StringComparison.OrdinalIgnoreCase))
-                        _loadedDrivers.Add(svcName);
-                }
+                var parts = CsvParser.ParseLine(lines[i]);
+                if (parts.Length > 0 && !string.IsNullOrWhiteSpace(parts[0]))
+                    _loadedDrivers.Add(parts[0].Trim());
             }
         }
         catch { }
@@ -1178,9 +1177,8 @@ public static class NetworkHealthService
     }
 
     /// <summary>
-    /// 通过 driverquery /SVC 精确确认驱动是否在内核中加载（从缓存查询）。
-    /// /SVC 格式：显示名   类型   状态   服务名（最后一列是精确的驱动服务名）。
-    /// 必须精确匹配最后一列，避免子串误报。
+    /// 通过 Win32_SystemDriver 的 Running 状态确认驱动是否已加载（从缓存查询）。
+    /// 使用驱动服务名精确匹配，避免显示名/文件名子串造成误报。
     /// </summary>
     private static bool IsDriverLoaded(string serviceName)
         => _loadedDrivers.Contains(serviceName);
