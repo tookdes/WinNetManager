@@ -782,7 +782,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var jobs = new[]
         {
             (Name: "WFP state", Relative: "07-firewall/wfp-state.xml", ArgsPrefix: "wfp show state"),
-            (Name: "WFP filters", Relative: "07-firewall/wfp-filters.xml", ArgsPrefix: "wfp show filters"),
+            (Name: "WFP filters", Relative: "07-firewall/wfp-filters.xml", ArgsPrefix: "wfp show filters verbose=on"),
             (Name: "WFP system ports", Relative: "07-firewall/wfp-sysports.xml", ArgsPrefix: "wfp show sysports")
         };
 
