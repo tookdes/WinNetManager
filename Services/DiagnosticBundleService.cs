@@ -273,6 +273,11 @@ public static class DiagnosticBundleService
                 }
             }
 
+            progress?.Report("整理主动探测的源地址 / 出口网卡 / 路由证据...");
+            var routeRecord = WriteRouteAttribution(workDir, pingResults, httpResults);
+            records.Add(routeRecord);
+            if (IsStepError(routeRecord.Status)) errorCount++;
+
             progress?.Report("检查近期 IP 冲突与网络事件...");
             try
             {
@@ -2031,6 +2036,69 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         if (!task.Wait(timeoutMs, cancellationToken))
             throw new TimeoutException($"DNS resolution timed out after {timeoutMs} ms: {host}");
         return task.GetAwaiter().GetResult();
+    }
+
+    private static DiagnosticStepRecord WriteRouteAttribution(
+        string root,
+        List<PingProbeResult> pingResults,
+        List<HttpProbeResult> httpResults)
+    {
+        const string relative = "05-connectivity/route-attribution.tsv";
+        var sb = new StringBuilder();
+        sb.AppendLine("Probe\tMode\tTarget\tRouteDestination\tActualLocalEndpoint\tActualRemoteEndpoint\tAddressFamily\tRouteLookup\tBestSource\tInterfaceIndex\tInterface\tInterfaceDescription\tNextHop\tDestinationPrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tNote");
+
+        int rows = 0;
+
+        foreach (var p in pingResults)
+        {
+            var r = p.Route;
+            if (r == null)
+                continue;
+
+            rows++;
+            sb.AppendLine(
+                $"Ping\t{EscapeTsv(p.Kind)}\t{EscapeTsv(p.Target)}\t{EscapeTsv(r.Destination)}\t\t\t" +
+                $"{EscapeTsv(r.AddressFamily)}\t{(r.Success ? "OK" : "FAIL")}\t{EscapeTsv(r.BestSourceAddress)}\t{r.InterfaceIndex}\t" +
+                $"{EscapeTsv(r.InterfaceName)}\t{EscapeTsv(r.InterfaceDescription)}\t{EscapeTsv(r.NextHop)}\t{EscapeTsv(r.DestinationPrefix)}\t" +
+                $"{(r.Success ? r.RouteMetric.ToString() : "")}\t{(r.InterfaceMetric?.ToString() ?? "")}\t{(r.EffectiveMetric?.ToString() ?? "")}\t" +
+                $"{EscapeTsv(r.Error)}");
+        }
+
+        foreach (var h in httpResults)
+        {
+            var r = h.Route;
+            if (r == null && string.IsNullOrWhiteSpace(h.TransportRemoteEndpoint))
+                continue;
+
+            rows++;
+            string note = h.Mode.StartsWith("System proxy", StringComparison.Ordinal)
+                ? "Actual transport remote may be the system proxy rather than the origin URL."
+                : "Actual TCP transport captured by SocketsHttpHandler.";
+
+            if (r != null && !string.IsNullOrWhiteSpace(r.Error))
+                note += " " + r.Error;
+
+            sb.AppendLine(
+                $"HTTP\t{EscapeTsv(h.Mode)}\t{EscapeTsv(h.Url)}\t{EscapeTsv(r?.Destination ?? "")}\t" +
+                $"{EscapeTsv(h.TransportLocalEndpoint)}\t{EscapeTsv(h.TransportRemoteEndpoint)}\t{EscapeTsv(r?.AddressFamily ?? "")}\t" +
+                $"{(r == null ? "" : r.Success ? "OK" : "FAIL")}\t{EscapeTsv(r?.BestSourceAddress ?? "")}\t{(r?.InterfaceIndex.ToString() ?? "")}\t" +
+                $"{EscapeTsv(r?.InterfaceName ?? "")}\t{EscapeTsv(r?.InterfaceDescription ?? "")}\t{EscapeTsv(r?.NextHop ?? "")}\t" +
+                $"{EscapeTsv(r?.DestinationPrefix ?? "")}\t{(r?.Success == true ? r.RouteMetric.ToString() : "")}\t" +
+                $"{(r?.InterfaceMetric?.ToString() ?? "")}\t{(r?.EffectiveMetric?.ToString() ?? "")}\t{EscapeTsv(note)}");
+        }
+
+        WriteText(root, relative, sb.ToString());
+
+        return new DiagnosticStepRecord
+        {
+            Name = "整理主动探测路由归因",
+            File = relative,
+            Status = rows > 0 ? "OK" : "EMPTY",
+            ExitCode = 0,
+            Error = rows > 0
+                ? ""
+                : "没有可归因的主动探测路由结果（例如 DNS 在发送探测前已失败）。"
+        };
     }
 
     private static int ReadRecentIpConflictCount(string root)
