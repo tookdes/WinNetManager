@@ -42,7 +42,7 @@
                      ToolTip="IP 地址、域名或 http(s) URL；生成深度诊断包时会作为本次故障目标额外测试"/>
             <Label Grid.Column="2" Content="端口：" VerticalAlignment="Center" Margin="8,0,0,0"/>
             <TextBox Grid.Column="3" x:Name="TxtPort" Padding="4,2" Text="443"
-                     ToolTip="TCP 端口，默认 443；若目标是带显式端口的 URL，则以 URL 端口为准"/>
+                     ToolTip="TCP 端口，默认 443；用于域名/IP 目标。若目标是 URL，则按 URL 的协议/显式端口测试"/>
             <TextBlock Grid.Column="4" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"
                        Margin="12,0,0,0" VerticalAlignment="Center"
                        Text="Tracert/Pathping 使用此目标；生成深度诊断包时若目标非空，也会额外测试该域名/IP/URL 与端口。"/>
