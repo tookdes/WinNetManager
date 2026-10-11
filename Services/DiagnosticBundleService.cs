@@ -63,7 +63,7 @@ internal sealed class PingProbeResult
     public string ResolvedAddress { get; set; } = "";
     public string DnsStatus { get; set; } = "";
     public string Error { get; set; } = "";
-    public double LossPercent => Sent <= 0 ? 100 : (Sent - Received) * 100.0 / Sent;
+    public double LossPercent => Sent <= 0 ? double.NaN : (Sent - Received) * 100.0 / Sent;
 }
 
 internal sealed class HttpProbeResult
@@ -1366,7 +1366,10 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var sb = new StringBuilder();
         sb.AppendLine("Target\tKind\tResolvedAddress\tDnsStatus\tSent\tReceived\tLoss%\tMinMs\tAvgMs\tMaxMs\tError");
         foreach (var r in results)
-            sb.AppendLine($"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{EscapeTsv(r.DnsStatus)}\t{r.Sent}\t{r.Received}\t{r.LossPercent:F1}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
+        {
+            string loss = double.IsNaN(r.LossPercent) ? "" : r.LossPercent.ToString("F1");
+            sb.AppendLine($"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{EscapeTsv(r.DnsStatus)}\t{r.Sent}\t{r.Received}\t{loss}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
+        }
         WriteText(root, "05-connectivity/ping-tests.tsv", sb.ToString());
 
         foreach (var g in results.Where(r => r.Kind == "Gateway" && r.Received > 0 && r.LossPercent >= 20))
@@ -1380,7 +1383,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
     private static PingProbeResult PingTarget(string target, string kind, int count, int timeoutMs, CancellationToken cancellationToken)
     {
-        var result = new PingProbeResult { Target = target, Kind = kind, Sent = count };
+        var result = new PingProbeResult { Target = target, Kind = kind };
         var times = new List<long>();
 
         try
@@ -1423,6 +1426,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 result.ResolvedAddress = target;
             }
 
+            result.Sent = count;
             using var ping = new Ping();
             for (int i = 0; i < count; i++)
             {
@@ -2024,7 +2028,11 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("| 目标 | 类型 | DNS | 收/发 | 丢包 | 平均延迟 |");
         sb.AppendLine("|---|---|---|---:|---:|---:|");
         foreach (var p in pingResults)
-            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {Md(string.IsNullOrWhiteSpace(p.DnsStatus) ? "-" : p.DnsStatus)} | {p.Received}/{p.Sent} | {p.LossPercent:F0}% | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
+        {
+            string loss = double.IsNaN(p.LossPercent) ? "-" : $"{p.LossPercent:F0}%";
+            string sentReceived = p.Sent <= 0 ? "未发送" : $"{p.Received}/{p.Sent}";
+            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {Md(string.IsNullOrWhiteSpace(p.DnsStatus) ? "-" : p.DnsStatus)} | {sentReceived} | {loss} | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
+        }
         sb.AppendLine();
 
         sb.AppendLine("## HTTP / HTTPS 摘要");
