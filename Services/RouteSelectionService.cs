@@ -288,8 +288,10 @@ internal static class RouteSelectionService
                     FlowInfo = 0,
                     Address = new In6Addr
                     {
-                        Part1 = BitConverter.ToUInt64(bytes, 0),
-                        Part2 = BitConverter.ToUInt64(bytes, 8)
+                        Part1 = BitConverter.ToUInt32(bytes, 0),
+                        Part2 = BitConverter.ToUInt32(bytes, 4),
+                        Part3 = BitConverter.ToUInt32(bytes, 8),
+                        Part4 = BitConverter.ToUInt32(bytes, 12)
                     },
                     ScopeId = checked((uint)Math.Max(0, address.ScopeId))
                 };
@@ -311,7 +313,9 @@ internal static class RouteSelectionService
             {
                 byte[] bytes = new byte[16];
                 BitConverter.GetBytes(Ipv6.Address.Part1).CopyTo(bytes, 0);
-                BitConverter.GetBytes(Ipv6.Address.Part2).CopyTo(bytes, 8);
+                BitConverter.GetBytes(Ipv6.Address.Part2).CopyTo(bytes, 4);
+                BitConverter.GetBytes(Ipv6.Address.Part3).CopyTo(bytes, 8);
+                BitConverter.GetBytes(Ipv6.Address.Part4).CopyTo(bytes, 12);
                 return new IPAddress(bytes, Ipv6.ScopeId);
             }
 
@@ -348,8 +352,13 @@ internal static class RouteSelectionService
     [StructLayout(LayoutKind.Sequential)]
     private struct In6Addr
     {
-        public ulong Part1;
-        public ulong Part2;
+        // Use 32-bit chunks so the managed alignment matches native IN6_ADDR /
+        // SOCKADDR_IN6 (4-byte alignment). Using ulong here would shift
+        // IP_ADDRESS_PREFIX inside MIB_IPFORWARD_ROW2 on x64.
+        public uint Part1;
+        public uint Part2;
+        public uint Part3;
+        public uint Part4;
     }
 
     [StructLayout(LayoutKind.Sequential)]
