@@ -1681,7 +1681,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         return results;
     }
 
-    private static HttpProbeResult HttpProbe(string url, bool useProxy, CancellationToken cancellationToken)
+    internal static HttpProbeResult HttpProbe(string url, bool useProxy, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         var r = new HttpProbeResult
