@@ -956,19 +956,54 @@ public static class NetworkHealthService
                 var ipv4Addrs = props.UnicastAddresses
                     .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
                     .ToList();
+                var ipv6Global = props.UnicastAddresses
+                    .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+                                && !a.Address.IsIPv6LinkLocal
+                                && !a.Address.IsIPv6SiteLocal
+                                && !System.Net.IPAddress.IsLoopback(a.Address))
+                    .ToList();
 
                 if (ipv4Addrs.Count == 0)
                 {
-                    // 已连接但无 IPv4 地址 — DHCP 可能失败
-                    items.Add(new NetworkHealthItem
+                    if (ipv6Global.Count > 0)
                     {
-                        Category = "IP 配置",
-                        Name = $"{ni.Name} 无 IPv4 地址",
-                        Status = "未分配",
-                        Detail = "适配器已连接但没有 IPv4 地址，可能是 DHCP 服务器不可达或未配置静态 IP。",
-                        Risk = "Warn"
-                    });
-                    continue; // 无 IP 则后续检查无意义
+                        items.Add(new NetworkHealthItem
+                        {
+                            Category = "IP 配置",
+                            Name = $"{ni.Name} IPv6-only / IPv6-first",
+                            Status = $"无 IPv4；有 {ipv6Global.Count} 个全局 IPv6 地址",
+                            Detail = "适配器没有 IPv4，但存在可用的全局 IPv6 地址；这可能是正常的 IPv6-only / IPv6-first 网络，不应直接判定 DHCP 失败。",
+                            Risk = "Info"
+                        });
+
+                        var ipv6DnsOnly = props.DnsAddresses
+                            .Where(d => d.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+                                        && !d.IsIPv6LinkLocal)
+                            .ToList();
+                        if (ipv6DnsOnly.Count == 0)
+                        {
+                            items.Add(new NetworkHealthItem
+                            {
+                                Category = "IP 配置",
+                                Name = $"{ni.Name} IPv6 无 DNS",
+                                Status = $"有 {ipv6Global.Count} 个全局 IPv6 地址",
+                                Detail = "已分配全局 IPv6 地址但未配置 IPv6 DNS 服务器；若网络不提供 DNS64/IPv4 DNS 可达路径，域名解析可能受影响。",
+                                Risk = "Info"
+                            });
+                        }
+                    }
+                    else
+                    {
+                        items.Add(new NetworkHealthItem
+                        {
+                            Category = "IP 配置",
+                            Name = $"{ni.Name} 无可用 IP 地址",
+                            Status = "无 IPv4 / 全局 IPv6",
+                            Detail = "适配器已连接但没有 IPv4 或可用的全局 IPv6 地址，可能是 DHCP/RA、VLAN、认证或链路配置异常。",
+                            Risk = "Warn"
+                        });
+                    }
+                    continue;
                 }
 
                 foreach (var ipv4 in ipv4Addrs)
@@ -1055,11 +1090,6 @@ public static class NetworkHealthService
                 // --- IPv6 检查 ---
                 if (ni.Supports(System.Net.NetworkInformation.NetworkInterfaceComponent.IPv6))
                 {
-                    var ipv6Global = props.UnicastAddresses
-                        .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
-                                  && !a.Address.IsIPv6LinkLocal)
-                        .ToList();
-
                     var ipv6Dns = props.DnsAddresses
                         .Where(d => d.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
                                   && !d.IsIPv6LinkLocal)
