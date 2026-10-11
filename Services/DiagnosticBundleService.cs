@@ -421,6 +421,21 @@ Get-NetOffloadGlobalSetting -ErrorAction SilentlyContinue |
 Get-NetAdapterRss -ErrorAction SilentlyContinue |
   Select-Object Name,Enabled,NumberOfReceiveQueues,Profile,BaseProcessorNumber,MaxProcessorNumber |
   Format-Table -AutoSize | Out-String -Width 4096
+"=== LSO ==="
+if (Get-Command Get-NetAdapterLso -ErrorAction SilentlyContinue) {
+  Get-NetAdapterLso -ErrorAction SilentlyContinue |
+    Select-Object Name,IPv4Enabled,IPv6Enabled | Format-Table -AutoSize | Out-String -Width 4096
+}
+"=== Checksum Offload ==="
+if (Get-Command Get-NetAdapterChecksumOffload -ErrorAction SilentlyContinue) {
+  Get-NetAdapterChecksumOffload -ErrorAction SilentlyContinue |
+    Format-Table -AutoSize | Out-String -Width 4096
+}
+"=== RSC ==="
+if (Get-Command Get-NetAdapterRsc -ErrorAction SilentlyContinue) {
+  Get-NetAdapterRsc -ErrorAction SilentlyContinue |
+    Format-Table -AutoSize | Out-String -Width 4096
+}
 """, 20000),
 
             ("03-routing/routes-active.txt", "收集活动路由表", """
@@ -553,11 +568,32 @@ Get-NetCompartment -ErrorAction SilentlyContinue |
   Format-Table -AutoSize | Out-String -Width 4096
 """, 15000),
 
-            ("06-proxy-vpn/wininet-proxy.txt", "收集 WinINET / PAC 代理设置", """
+            ("06-proxy-vpn/wininet-proxy.txt", "收集 WinINET / PAC / GPO 代理设置", """
+"=== Current user Internet Settings ==="
 Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue |
   Select-Object ProxyEnable,ProxyServer,ProxyOverride,AutoConfigURL,AutoDetect |
   Format-List * | Out-String -Width 4096
-""", 10000),
+"=== Machine Internet Settings ==="
+Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue |
+  Select-Object ProxyEnable,ProxyServer,ProxyOverride,AutoConfigURL,AutoDetect |
+  Format-List * | Out-String -Width 4096
+"=== Internet Settings policy ==="
+Get-ItemProperty 'HKLM:\Software\Policies\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue |
+  Select-Object ProxySettingsPerUser,ProxySettingsPerUserPolicy |
+  Format-List * | Out-String -Width 4096
+"=== Current user Connections blobs ==="
+$p = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections' -ErrorAction SilentlyContinue
+foreach ($n in @('DefaultConnectionSettings','SavedLegacySettings')) {
+  $v = $p.$n
+  if ($v) {
+    [pscustomobject]@{
+      Name = $n
+      Length = $v.Length
+      Hex = (($v | ForEach-Object { $_.ToString('X2') }) -join '')
+    } | Format-List * | Out-String -Width 4096
+  }
+}
+""", 12000),
 
             ("06-proxy-vpn/vpn.txt", "收集 Windows VPN 配置与状态", """
 "=== Current-user VPN ==="
@@ -604,8 +640,8 @@ Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\NetworkProvider\HWOrder
 """, 10000),
 
             ("08-services/services.txt", "收集关键网络服务", """
-$names = @('Dhcp','Dnscache','NlaSvc','netprofm','WlanSvc','iphlpsvc','WinHttpAutoProxySvc',
-           'BFE','MpsSvc','PolicyAgent','IKEEXT','RemoteAccess','RasMan','lmhosts','SharedAccess')
+$names = @('Dhcp','Dnscache','NlaSvc','netprofm','WlanSvc','dot3svc','EapHost','WwanSvc','Winmgmt','EventLog',
+           'iphlpsvc','WinHttpAutoProxySvc','BFE','MpsSvc','PolicyAgent','IKEEXT','RemoteAccess','RasMan','lmhosts','SharedAccess')
 Get-Service -ErrorAction SilentlyContinue |
   Where-Object { $names -contains $_.Name -or $_.Name -match 'tailscale|zerotier|wireguard|proxifier|adguard|netlimiter' } |
   Select-Object Name,DisplayName,Status,StartType |
@@ -648,27 +684,38 @@ $c | Group-Object OwningProcess | Sort-Object Count -Descending | Select-Object 
 """, 20000),
 
             ("09-connections/tcp-connections.csv", "收集全部 TCP 连接", """
+$procs = @{}
+Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $procs[$_.Id] = $_.ProcessName }
 Get-NetTCPConnection -ErrorAction SilentlyContinue |
   Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess,
-    @{n='ProcessName';e={ try { (Get-Process -Id $_.OwningProcess -ErrorAction Stop).ProcessName } catch { '' } }} |
+    @{n='ProcessName';e={ $procs[[int]$_.OwningProcess] }} |
   ConvertTo-Csv -NoTypeInformation
 """, 25000),
 
             ("09-connections/udp-endpoints.csv", "收集全部 UDP 端点", """
+$procs = @{}
+Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $procs[$_.Id] = $_.ProcessName }
 Get-NetUDPEndpoint -ErrorAction SilentlyContinue |
   Select-Object LocalAddress,LocalPort,OwningProcess,
-    @{n='ProcessName';e={ try { (Get-Process -Id $_.OwningProcess -ErrorAction Stop).ProcessName } catch { '' } }} |
+    @{n='ProcessName';e={ $procs[[int]$_.OwningProcess] }} |
   ConvertTo-Csv -NoTypeInformation
 """, 25000),
 
             ("10-events/network-events-48h.txt", "收集最近 48 小时网络相关系统事件", """
 $start = (Get-Date).AddHours(-48)
-Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start} -MaxEvents 5000 -ErrorAction SilentlyContinue |
+$criticalIds = @(1014,4199,4201,1001,1002,50036,50058,50067,10400,10401,10402,10403)
+$critical = Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start;Id=$criticalIds} -ErrorAction SilentlyContinue
+
+# Supplement with recent network-provider events. Critical IDs above are already safe from MaxEvents truncation.
+$recent = Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start} -MaxEvents 5000 -ErrorAction SilentlyContinue |
   Where-Object {
-    $_.Id -in @(1014,4199,4201,1001,1002,50036,50058,50067,10400,10401,10402,10403) -or
-    $_.ProviderName -match 'Tcpip|Dhcp|DNS|NlaSvc|NetworkProfile|WLAN|NDIS|Netwtw|e2f|e2fn|Realtek|rt640x|Kernel-PnP'
-  } |
-  Select-Object -First 1200 TimeCreated,Id,LevelDisplayName,ProviderName,Message |
+    $_.ProviderName -match 'Tcpip|Dhcp|DNS|NlaSvc|NetworkProfile|WLAN|NDIS|Netwtw|e2f|e2fn|Realtek|rt640x|Kernel-PnP|VmSwitch|EapHost|Wired-AutoConfig'
+  }
+
+@($critical + $recent) |
+  Sort-Object RecordId -Unique |
+  Sort-Object TimeCreated -Descending |
+  Select-Object -First 1500 TimeCreated,Id,LevelDisplayName,ProviderName,Message |
   Format-List * | Out-String -Width 4096
 """, 30000),
 
@@ -700,10 +747,48 @@ foreach ($log in $logs) {
 
             ("10-events/dns-client-events-48h.txt", "收集最近 48 小时 DNS Client 事件", """
 $start = (Get-Date).AddHours(-48)
-Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-DNS-Client';StartTime=$start} -ErrorAction SilentlyContinue |
-  Select-Object -First 500 TimeCreated,Id,LevelDisplayName,Message |
-  Format-List * | Out-String -Width 4096
+$logs = @('Microsoft-Windows-DNS-Client/Operational','System')
+foreach ($logName in $logs) {
+  $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
+  if (-not $log) { continue }
+  "===== $logName ====="
+  if (-not $log.IsEnabled) {
+    "Log is disabled."
+    continue
+  }
+  if ($logName -eq 'System') {
+    Get-WinEvent -FilterHashtable @{LogName=$logName;ProviderName='Microsoft-Windows-DNS-Client';StartTime=$start} -MaxEvents 500 -ErrorAction SilentlyContinue |
+      Select-Object TimeCreated,Id,LevelDisplayName,Message | Format-List * | Out-String -Width 4096
+  } else {
+    Get-WinEvent -FilterHashtable @{LogName=$logName;StartTime=$start} -MaxEvents 500 -ErrorAction SilentlyContinue |
+      Select-Object TimeCreated,Id,LevelDisplayName,Message | Format-List * | Out-String -Width 4096
+  }
+}
 """, 20000),
+
+            ("10-events/enterprise-network-events-48h.txt", "收集 802.1X / EAP / Hyper-V vSwitch 事件", """
+$start = (Get-Date).AddHours(-48)
+$logs = @(
+  'Microsoft-Windows-Wired-AutoConfig/Operational',
+  'Microsoft-Windows-EapHost/Operational',
+  'Microsoft-Windows-Hyper-V-VmSwitch/Operational'
+)
+foreach ($logName in $logs) {
+  $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
+  "===== $logName ====="
+  if (-not $log) {
+    "Log not present."
+    continue
+  }
+  if (-not $log.IsEnabled) {
+    "Log is disabled."
+    continue
+  }
+  Get-WinEvent -FilterHashtable @{LogName=$logName;StartTime=$start} -MaxEvents 800 -ErrorAction SilentlyContinue |
+    Select-Object TimeCreated,Id,LevelDisplayName,ProviderName,Message |
+    Format-List * | Out-String -Width 4096
+}
+""", 25000),
 
             ("10-events/wlan-events-48h.txt", "收集最近 48 小时 Wi-Fi 连接事件", """
 $start = (Get-Date).AddHours(-48)
@@ -733,6 +818,12 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             ("03-routing/netsh-ipv6-routes.txt", "收集 netsh IPv6 路由", "netsh.exe", "interface ipv6 show route", 15000),
             ("02-adapters/wlan-interfaces.txt", "收集当前 Wi-Fi 连接", "netsh.exe", "wlan show interfaces", 15000),
             ("02-adapters/wlan-drivers.txt", "收集 Wi-Fi 驱动能力", "netsh.exe", "wlan show drivers", 15000),
+            ("02-adapters/wlan-settings.txt", "收集 Wi-Fi 全局设置", "netsh.exe", "wlan show settings", 10000),
+            ("02-adapters/wlan-profiles.txt", "列出 Wi-Fi 配置文件（不含密钥）", "netsh.exe", "wlan show profiles", 10000),
+            ("02-adapters/lan-interfaces.txt", "收集有线 802.1X 接口状态", "netsh.exe", "lan show interfaces", 10000),
+            ("02-adapters/lan-settings.txt", "收集有线 802.1X 全局设置", "netsh.exe", "lan show settings", 10000),
+            ("02-adapters/lan-profiles.txt", "列出有线 802.1X 配置文件", "netsh.exe", "lan show profiles", 10000),
+            ("02-adapters/mbn-interfaces.txt", "收集蜂窝/WWAN 接口", "netsh.exe", "mbn show interfaces", 10000),
             ("02-adapters/tcp-global.txt", "收集 netsh TCP 全局设置", "netsh.exe", "interface tcp show global", 15000),
             ("02-adapters/ipv6-prefix-policies.txt", "收集 IPv6 前缀优先级策略", "netsh.exe", "interface ipv6 show prefixpolicies", 15000),
             ("02-adapters/teredo-state.txt", "收集 Teredo 状态", "netsh.exe", "interface teredo show state", 10000),
@@ -748,7 +839,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             ("09-connections/excluded-ports-ipv6-udp.txt", "收集 IPv6 UDP 排除端口范围", "netsh.exe", "interface ipv6 show excludedportrange protocol=udp", 10000),
             ("02-adapters/dhcp-client-trace-dump.txt", "导出 DHCP Client 最近跟踪记录", "netsh.exe", "dhcpclient trace dump", 15000),
             ("08-services/winsock-catalog.txt", "收集 Winsock Catalog", "netsh.exe", "winsock show catalog", 20000),
-            ("08-services/driverquery.csv", "导出驱动列表", "driverquery.exe", "/FO CSV /SVC", 15000),
+            ("08-services/driverquery.csv", "导出驱动列表", "driverquery.exe", "/FO CSV", 15000),
             ("09-connections/netstat-ano.txt", "运行 netstat -ano", "netstat.exe", "-ano", 20000),
             ("01-system/time-sync.txt", "检查 Windows 时间同步", "w32tm.exe", "/query /status", 10000)
         };
