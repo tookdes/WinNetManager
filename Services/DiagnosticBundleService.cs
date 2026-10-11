@@ -159,6 +159,13 @@ public static class DiagnosticBundleService
                 if (record.Status != "OK") errorCount++;
             }
 
+            progress?.Report("导出 Windows Filtering Platform (WFP) 状态...");
+            foreach (var record in CollectWfpSnapshot(workDir))
+            {
+                records.Add(record);
+                if (record.Status == "WARN") errorCount++;
+            }
+
             progress?.Report("采样网卡流量、丢包和错误计数（5 秒）...");
             try
             {
@@ -200,6 +207,13 @@ public static class DiagnosticBundleService
                 errorCount++;
             }
 
+            progress?.Report("执行条件化 Traceroute（并发、限时）...");
+            foreach (var record in RunConditionalTraceroutes(workDir, pingResults))
+            {
+                records.Add(record);
+                if (record.Status == "WARN") errorCount++;
+            }
+
             progress?.Report("测试 HTTP / HTTPS（直连与系统代理路径）...");
             try
             {
@@ -224,6 +238,7 @@ public static class DiagnosticBundleService
             catch { }
 
             AnalyzeConnectivity(findings, pingResults, httpResults, ref warningCount);
+            AnalyzeTcpPortPressure(findings, ref warningCount);
             AddStructuralFindings(findings, ref warningCount);
 
             if (options.IncludePacketCapture)
@@ -743,6 +758,133 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         };
     }
 
+    private static List<DiagnosticStepRecord> CollectWfpSnapshot(string root)
+    {
+        var records = new List<DiagnosticStepRecord>();
+        string dir = EnsureDirectory(root, "07-firewall");
+
+        if (!IsAdministrator())
+        {
+            const string message = "当前进程不是管理员权限，跳过 WFP state/filters 导出。";
+            WriteText(root, "07-firewall/wfp-skipped.txt", message);
+            records.Add(new DiagnosticStepRecord
+            {
+                Name = "导出 WFP 状态",
+                File = "07-firewall/wfp-skipped.txt",
+                Status = "SKIP",
+                ExitCode = 0,
+                Error = message
+            });
+            return records;
+        }
+
+        var jobs = new[]
+        {
+            (Name: "WFP state", Relative: "07-firewall/wfp-state.xml", ArgsPrefix: "wfp show state"),
+            (Name: "WFP filters", Relative: "07-firewall/wfp-filters.xml", ArgsPrefix: "wfp show filters"),
+            (Name: "WFP system ports", Relative: "07-firewall/wfp-sysports.xml", ArgsPrefix: "wfp show sysports")
+        };
+
+        foreach (var job in jobs)
+        {
+            string path = Path.Combine(root, job.Relative.Replace('/', Path.DirectorySeparatorChar));
+            var sw = Stopwatch.StartNew();
+            string args = $"{job.ArgsPrefix} file=\"{path}\"";
+            string output = ProcessRunner.RunNative("netsh.exe", args, out string error, out int exitCode, 45000);
+            sw.Stop();
+
+            bool hasFile = File.Exists(path) && new FileInfo(path).Length > 0;
+            string status = exitCode == 0 && hasFile ? "OK" : "WARN";
+            string control = $"Command: netsh {args}\r\nExitCode: {exitCode}\r\nDuration: {sw.Elapsed.TotalSeconds:F2}s\r\n" +
+                             $"Output file: {path}\r\nExists: {hasFile}\r\n\r\n{output}\r\n{error}";
+            WriteText(root, job.Relative + ".log.txt", control);
+
+            records.Add(new DiagnosticStepRecord
+            {
+                Name = $"导出 {job.Name}",
+                File = job.Relative,
+                Status = status,
+                ExitCode = exitCode,
+                DurationMs = sw.ElapsedMilliseconds,
+                Error = status == "OK" ? "" : (string.IsNullOrWhiteSpace(error) ? "WFP 输出文件未生成或为空" : error)
+            });
+        }
+
+        return records;
+    }
+
+    private static List<DiagnosticStepRecord> RunConditionalTraceroutes(
+        string root,
+        List<PingProbeResult> pings)
+    {
+        bool publicIpv4Responded = pings.Any(p =>
+            p.Kind.StartsWith("Public IPv4", StringComparison.Ordinal) && p.Received > 0);
+
+        if (!publicIpv4Responded && !HasUsableIpv4DefaultRoute())
+        {
+            const string reason =
+                "跳过公网 Traceroute：当前没有可用 IPv4 默认网关，且公共 IPv4 Ping 无响应。此时 Traceroute 对定位 DHCP/APIPA/本地链路故障价值较低。";
+            WriteText(root, "05-connectivity/traceroute-skipped.txt", reason);
+            return new List<DiagnosticStepRecord>
+            {
+                new()
+                {
+                    Name = "公网 Traceroute",
+                    File = "05-connectivity/traceroute-skipped.txt",
+                    Status = "SKIP",
+                    ExitCode = 0,
+                    Error = reason
+                }
+            };
+        }
+
+        var targets = new[]
+        {
+            (Target: "223.5.5.5", File: "05-connectivity/traceroute-223.5.5.5.txt", Name: "Traceroute 到阿里 DNS 223.5.5.5"),
+            (Target: "1.1.1.1", File: "05-connectivity/traceroute-1.1.1.1.txt", Name: "Traceroute 到 1.1.1.1")
+        };
+
+        // -d 避免逐跳反向 DNS；12 hops * 3 probes * 400ms，完全断网时单条约 15 秒封顶。
+        var tasks = targets.Select(t => Task.Run(() =>
+            RunNativeStep(root, t.File, t.Name, "tracert.exe",
+                $"-d -h 12 -w 400 {t.Target}", 20000))).ToArray();
+
+        return Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
+    }
+
+    private static bool HasUsableIpv4DefaultRoute()
+    {
+        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up ||
+                ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                continue;
+
+            try
+            {
+                var props = ni.GetIPProperties();
+                bool hasUsableV4 = props.UnicastAddresses.Any(a =>
+                {
+                    if (a.Address.AddressFamily != AddressFamily.InterNetwork ||
+                        IPAddress.IsLoopback(a.Address))
+                        return false;
+                    byte[] b = a.Address.GetAddressBytes();
+                    return !(b.Length == 4 && b[0] == 169 && b[1] == 254);
+                });
+
+                bool hasGateway = props.GatewayAddresses.Any(g =>
+                    g.Address.AddressFamily == AddressFamily.InterNetwork &&
+                    !g.Address.Equals(IPAddress.Any));
+
+                if (hasUsableV4 && hasGateway)
+                    return true;
+            }
+            catch { }
+        }
+
+        return false;
+    }
+
     private static void WriteCommandResult(
         string root, string relative, string title, string command, string output, string error, int exitCode, TimeSpan duration)
     {
@@ -1125,6 +1267,44 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         }
     }
 
+    private static void AnalyzeTcpPortPressure(List<string> findings, ref int warningCount)
+    {
+        try
+        {
+            var connections = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpConnections();
+            int timeWait = connections.Count(c => c.State == TcpState.TimeWait);
+            int closeWait = connections.Count(c => c.State == TcpState.CloseWait);
+            int synSent = connections.Count(c => c.State == TcpState.SynSent);
+            int highUniquePorts = connections
+                .Where(c => c.LocalEndPoint.Port >= 49152)
+                .Select(c => c.LocalEndPoint.Port)
+                .Distinct()
+                .Count();
+
+            if (highUniquePorts >= 12000 || timeWait >= 10000)
+            {
+                findings.Add(
+                    $"[警告] TCP 高端口/TimeWait 压力较高：高端口唯一占用 {highUniquePorts}，TIME_WAIT {timeWait}。这不等同于已经耗尽，请结合 09-connections/dynamic-ports-*.txt 与 excluded-ports-*.txt 判断实际动态端口范围。");
+                warningCount++;
+            }
+
+            if (closeWait >= 1000)
+            {
+                findings.Add(
+                    $"[警告] 当前 CLOSE_WAIT 连接 {closeWait} 条，可能存在应用未及时关闭 socket 的问题；请结合 tcp-connections.csv 和 tcp-state-summary.txt 定位进程。");
+                warningCount++;
+            }
+
+            if (synSent >= 1000)
+            {
+                findings.Add(
+                    $"[警告] 当前 SYN_SENT 连接 {synSent} 条，可能存在大量连接超时、上游不可达或防火墙静默丢包。");
+                warningCount++;
+            }
+        }
+        catch { }
+    }
+
     private static void AddStructuralFindings(List<string> findings, ref int warningCount)
     {
         var adapters = NetworkInterface.GetAllNetworkInterfaces()
@@ -1199,9 +1379,52 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         }
     }
 
+    private static bool IsAdministrator()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var principal = new WindowsPrincipal(identity);
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static DiagnosticStepRecord CapturePktMon(string root, int seconds)
     {
         string dir = EnsureDirectory(root, "11-packet-capture");
+
+        if (!IsAdministrator())
+        {
+            const string message = "PktMon 需要管理员权限；当前进程未提升，已跳过抓包。";
+            WriteText(root, "11-packet-capture/pktmon-control.txt", message);
+            return new DiagnosticStepRecord
+            {
+                Name = "PktMon 抓包",
+                File = "11-packet-capture/pktmon-control.txt",
+                Status = "SKIP",
+                ExitCode = 0,
+                Error = message
+            };
+        }
+
+        string pktmonExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "pktmon.exe");
+        if (!File.Exists(pktmonExe))
+        {
+            const string message = "系统中未找到 pktmon.exe；可能是旧版/精简版 Windows，已跳过抓包。";
+            WriteText(root, "11-packet-capture/pktmon-control.txt", message);
+            return new DiagnosticStepRecord
+            {
+                Name = "PktMon 抓包",
+                File = "11-packet-capture/pktmon-control.txt",
+                Status = "SKIP",
+                ExitCode = 0,
+                Error = message
+            };
+        }
         string etl = Path.Combine(dir, "pktmon.etl");
         string txt = Path.Combine(dir, "pktmon.txt");
         string pcapng = Path.Combine(dir, "pktmon.pcapng");
@@ -1209,7 +1432,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var log = new StringBuilder();
 
         string startArgs = $"start --capture --pkt-size 128 --file-name \"{etl}\" --file-size 32";
-        string startOutput = ProcessRunner.RunNative("pktmon.exe", startArgs, out string startError, out int startCode, 15000);
+        string startOutput = ProcessRunner.RunNative(pktmonExe, startArgs, out string startError, out int startCode, 15000);
         log.AppendLine("=== pktmon start ===");
         log.AppendLine(startOutput);
         log.AppendLine(startError);
@@ -1235,7 +1458,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         }
         finally
         {
-            string stopOutput = ProcessRunner.RunNative("pktmon.exe", "stop", out string stopError, out int stopCode, 15000);
+            string stopOutput = ProcessRunner.RunNative(pktmonExe, "stop", out string stopError, out int stopCode, 15000);
             log.AppendLine("=== pktmon stop ===");
             log.AppendLine(stopOutput);
             log.AppendLine(stopError);
@@ -1245,14 +1468,14 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         if (File.Exists(etl))
         {
             string txtArgs = $"etl2txt \"{etl}\" --out \"{txt}\"";
-            string conv = ProcessRunner.RunNative("pktmon.exe", txtArgs, out string convErr, out int convCode, 30000);
+            string conv = ProcessRunner.RunNative(pktmonExe, txtArgs, out string convErr, out int convCode, 30000);
             log.AppendLine("=== pktmon etl2txt ===");
             log.AppendLine(conv);
             log.AppendLine(convErr);
             log.AppendLine($"exit={convCode}");
 
             string pcapArgs = $"etl2pcap \"{etl}\" --out \"{pcapng}\"";
-            string pcap = ProcessRunner.RunNative("pktmon.exe", pcapArgs, out string pcapErr, out int pcapCode, 30000);
+            string pcap = ProcessRunner.RunNative(pktmonExe, pcapArgs, out string pcapErr, out int pcapCode, 30000);
             log.AppendLine("=== pktmon etl2pcap ===");
             log.AppendLine(pcap);
             log.AppendLine(pcapErr);
