@@ -140,6 +140,7 @@ public static class DiagnosticBundleService
                 WriteHealthSnapshot(workDir, healthItems);
                 warningCount += healthItems.Count(i => i.Risk == "Warn" || i.Risk == "Danger");
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 WriteText(workDir, "00-summary/network-health-error.txt", ex.ToString());
@@ -197,6 +198,7 @@ public static class DiagnosticBundleService
                     }
                 }
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 WriteText(workDir, "02-adapters/statistics-sample-error.txt", ex.ToString());
@@ -208,6 +210,7 @@ public static class DiagnosticBundleService
             {
                 pingResults = RunPingProbes(workDir, findings, ref warningCount, cancellationToken);
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 WriteText(workDir, "05-connectivity/ping-error.txt", ex.ToString());
@@ -226,6 +229,7 @@ public static class DiagnosticBundleService
             {
                 httpResults = RunHttpProbes(workDir, cancellationToken);
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 WriteText(workDir, "05-connectivity/http-error.txt", ex.ToString());
@@ -242,11 +246,12 @@ public static class DiagnosticBundleService
                     warningCount++;
                 }
             }
+            catch (OperationCanceledException) { throw; }
             catch { }
 
             AnalyzeConnectivity(findings, pingResults, httpResults, ref warningCount);
             AnalyzeTcpPortPressure(findings, ref warningCount);
-            AddStructuralFindings(findings, ref warningCount);
+            AddStructuralFindings(findings, pingResults, ref warningCount);
 
             if (options.IncludePacketCapture)
             {
@@ -1172,9 +1177,9 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var results = Task.WhenAll(pingTasks).GetAwaiter().GetResult().ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine("Target\tKind\tResolvedAddress\tSent\tReceived\tLoss%\tMinMs\tAvgMs\tMaxMs\tError");
+        sb.AppendLine("Target\tKind\tResolvedAddress\tDnsStatus\tSent\tReceived\tLoss%\tMinMs\tAvgMs\tMaxMs\tError");
         foreach (var r in results)
-            sb.AppendLine($"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{r.Sent}\t{r.Received}\t{r.LossPercent:F1}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
+            sb.AppendLine($"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{EscapeTsv(r.DnsStatus)}\t{r.Sent}\t{r.Received}\t{r.LossPercent:F1}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
         WriteText(root, "05-connectivity/ping-tests.tsv", sb.ToString());
 
         foreach (var g in results.Where(r => r.Kind == "Gateway" && r.Received > 0 && r.LossPercent >= 20))
@@ -1196,11 +1201,31 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             string address = target;
             if (!IPAddress.TryParse(target, out _))
             {
-                var addrs = ResolveHostWithTimeout(target, 4000);
+                IPAddress[] addrs;
+                try
+                {
+                    addrs = ResolveHostWithTimeout(target, 4000, cancellationToken);
+                    result.DnsStatus = "OK";
+                }
+                catch (TimeoutException ex)
+                {
+                    result.DnsStatus = "Timeout";
+                    result.Error = ex.Message;
+                    return result;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    result.DnsStatus = "Error";
+                    result.Error = ex.GetBaseException().Message;
+                    return result;
+                }
+
                 result.ResolvedAddress = string.Join(",", addrs.Select(a => a.ToString()).Take(6));
                 var preferred = addrs.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) ?? addrs.FirstOrDefault();
                 if (preferred == null)
                 {
+                    result.DnsStatus = "NoAddress";
                     result.Error = "DNS returned no address";
                     return result;
                 }
@@ -1214,6 +1239,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             using var ping = new Ping();
             for (int i = 0; i < count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     var reply = ping.Send(address, timeoutMs);
@@ -1230,6 +1256,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 }
             }
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             result.Error = ex.Message;
@@ -1259,9 +1286,9 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var results = Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine("Mode\tURL\tSuccess\tStatusCode\tDurationMs\tDetail");
+        sb.AppendLine("Mode\tURL\tResponseReceived\tSuccess\tStatusCode\tDurationMs\tDetail");
         foreach (var r in results)
-            sb.AppendLine($"{r.Mode}\t{EscapeTsv(r.Url)}\t{r.Success}\t{r.StatusCode}\t{r.DurationMs}\t{EscapeTsv(r.Detail)}");
+            sb.AppendLine($"{r.Mode}\t{EscapeTsv(r.Url)}\t{r.ResponseReceived}\t{r.Success}\t{r.StatusCode}\t{r.DurationMs}\t{EscapeTsv(r.Detail)}");
         WriteText(root, "05-connectivity/http-tests.tsv", sb.ToString());
         return results;
     }
@@ -1280,17 +1307,51 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             using var handler = new HttpClientHandler
             {
                 UseProxy = useProxy,
+                // Keep redirects visible: captive portals often reveal themselves as 30x here.
                 AllowAutoRedirect = false
             };
-            using var client = new HttpClient(handler)
-            {
-                Timeout = TimeSpan.FromSeconds(7)
-            };
+            using var client = new HttpClient(handler);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(7));
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            using var response = client.Send(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None);
-            r.Success = true;
+            using var response = client.Send(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+
+            r.ResponseReceived = true;
             r.StatusCode = (int)response.StatusCode;
-            r.Detail = response.ReasonPhrase ?? "";
+            bool ordinarySuccess = r.StatusCode >= 200 && r.StatusCode < 400;
+
+            if (url.Contains("msftconnecttest.com/connecttest.txt", StringComparison.OrdinalIgnoreCase))
+            {
+                string body = response.Content.ReadAsStringAsync(timeoutCts.Token).GetAwaiter().GetResult();
+                bool expectedBody = r.StatusCode == 200 &&
+                    string.Equals(body.Trim(), "Microsoft Connect Test", StringComparison.Ordinal);
+                r.Success = expectedBody;
+                if (!expectedBody)
+                {
+                    string location = response.Headers.Location?.ToString() ?? "";
+                    r.Detail = $"NCSI expected HTTP 200 + Microsoft Connect Test; got HTTP {r.StatusCode}" +
+                               (string.IsNullOrWhiteSpace(location) ? "" : $", Location={location}");
+                }
+                else
+                {
+                    r.Detail = "NCSI content matched";
+                }
+            }
+            else
+            {
+                r.Success = ordinarySuccess;
+                string location = response.Headers.Location?.ToString() ?? "";
+                r.Detail = (response.ReasonPhrase ?? "") +
+                           (string.IsNullOrWhiteSpace(location) ? "" : $"; Location={location}");
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            r.Detail = "HTTP probe timed out after 7 seconds";
         }
         catch (Exception ex)
         {
@@ -1304,10 +1365,10 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         return r;
     }
 
-    private static IPAddress[] ResolveHostWithTimeout(string host, int timeoutMs)
+    private static IPAddress[] ResolveHostWithTimeout(string host, int timeoutMs, CancellationToken cancellationToken = default)
     {
         var task = Dns.GetHostAddressesAsync(host);
-        if (!task.Wait(timeoutMs))
+        if (!task.Wait(timeoutMs, cancellationToken))
             throw new TimeoutException($"DNS resolution timed out after {timeoutMs} ms: {host}");
         return task.GetAwaiter().GetResult();
     }
@@ -1333,16 +1394,27 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var publicV6 = pings.Where(p => p.Kind.StartsWith("Public IPv6", StringComparison.Ordinal)).ToList();
         var domains = pings.Where(p => p.Kind.StartsWith("Domain", StringComparison.Ordinal)).ToList();
 
-        bool gatewayWorks = gateways.Count == 0 || gateways.Any(p => p.Received > 0);
+        bool gatewayWorks = gateways.Any(p => p.Received > 0);
         bool domesticWorks = domesticV4.Any(p => p.Received > 0);
         bool anyV4Works = publicV4.Any(p => p.Received > 0);
         bool domainResolutionFailed = domains.Count > 0 && domains.All(p =>
-            string.IsNullOrWhiteSpace(p.ResolvedAddress) || !string.IsNullOrWhiteSpace(p.Error));
+            string.IsNullOrWhiteSpace(p.ResolvedAddress));
+        bool allDnsTimedOut = domainResolutionFailed && domains.All(p => p.DnsStatus == "Timeout");
 
-        if (gatewayWorks && domesticV4.Count > 0 && domesticV4.All(p => p.Received == 0))
+        var directResponses = http.Where(h =>
+            h.Mode.StartsWith("Direct", StringComparison.Ordinal) && h.ResponseReceived).ToList();
+
+        if (gateways.Count > 0 && gatewayWorks && domesticV4.Count > 0 && domesticV4.All(p => p.Received == 0))
         {
-            findings.Add("[警告] 网关可达，但国内公共 IPv4 均不可达：故障更可能位于默认路由之后（上游出口、运营商、防火墙或策略路由）。");
-            warningCount++;
+            if (directResponses.Count > 0)
+            {
+                findings.Add("[提示] 网关可达、国内公共 IPv4 不响应 ICMP，但直连 HTTP/HTTPS 收到响应：更可能是公网 ICMP 被过滤，不应据此判定出口故障。");
+            }
+            else
+            {
+                findings.Add("[警告] 网关可达，但国内公共 IPv4 均不可达且直连 HTTP/HTTPS 未收到响应：故障更可能位于默认路由之后（上游出口、运营商、防火墙或策略路由）。");
+                warningCount++;
+            }
         }
 
         if (gateways.Count > 0 && gateways.All(p => p.Received == 0))
@@ -1360,7 +1432,14 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
         if (domesticWorks && domainResolutionFailed)
         {
-            findings.Add("[危险] 公共 IPv4 可达但常用域名均无法完成 DNS 解析：高度提示 DNS/NRPT/Hosts/代理接管问题。");
+            if (allDnsTimedOut)
+            {
+                findings.Add("[警告] 公共 IPv4 可达，但常用域名的系统 DNS 解析均超时：优先检查 DNS 服务器可达性、UDP/TCP 53、DoH/NRPT 或上游丢包；不能仅凭超时认定为代理接管。");
+            }
+            else
+            {
+                findings.Add("[危险] 公共 IPv4 可达，但常用域名均未获得 DNS 地址：重点检查 DNS/NRPT/Hosts/代理接管；请结合 04-dns 的逐服务器结果判断。");
+            }
             warningCount++;
         }
 
@@ -1378,8 +1457,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
         var direct = http.Where(h => h.Mode.StartsWith("Direct", StringComparison.Ordinal)).ToList();
         var proxied = http.Where(h => h.Mode.StartsWith("System proxy", StringComparison.Ordinal)).ToList();
-        int directOk = direct.Count(h => h.Success);
-        int proxyOk = proxied.Count(h => h.Success);
+        int directOk = direct.Count(h => h.ResponseReceived);
+        int proxyOk = proxied.Count(h => h.ResponseReceived);
 
         if (direct.Count > 0 && proxied.Count > 0)
         {
@@ -1438,7 +1517,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         catch { }
     }
 
-    private static void AddStructuralFindings(List<string> findings, ref int warningCount)
+    private static void AddStructuralFindings(List<string> findings, List<PingProbeResult> pingResults, ref int warningCount)
     {
         var adapters = NetworkInterface.GetAllNetworkInterfaces()
             .Where(n => n.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
@@ -1524,13 +1603,12 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             warningCount++;
         }
 
-        try
+        var baiduProbe = pingResults.FirstOrDefault(p =>
+            string.Equals(p.Target, "www.baidu.com", StringComparison.OrdinalIgnoreCase));
+        if (baiduProbe != null && string.IsNullOrWhiteSpace(baiduProbe.ResolvedAddress))
         {
-            ResolveHostWithTimeout("www.baidu.com", 4000);
-        }
-        catch
-        {
-            findings.Add("[警告] Windows 系统解析器无法解析 www.baidu.com；请重点查看 04-dns 与 network-health.tsv。");
+            string reason = baiduProbe.DnsStatus == "Timeout" ? "解析超时" : "解析失败";
+            findings.Add($"[警告] Windows 系统解析器对 www.baidu.com {reason}；请重点查看 04-dns 与 network-health.tsv。");
             warningCount++;
         }
     }
@@ -1708,17 +1786,22 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine();
 
         sb.AppendLine("## Ping 摘要");
-        sb.AppendLine("| 目标 | 类型 | 收/发 | 丢包 | 平均延迟 |");
-        sb.AppendLine("|---|---|---:|---:|---:|");
+        sb.AppendLine("| 目标 | 类型 | DNS | 收/发 | 丢包 | 平均延迟 |");
+        sb.AppendLine("|---|---|---|---:|---:|---:|");
         foreach (var p in pingResults)
-            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {p.Received}/{p.Sent} | {p.LossPercent:F0}% | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
+            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {Md(string.IsNullOrWhiteSpace(p.DnsStatus) ? "-" : p.DnsStatus)} | {p.Received}/{p.Sent} | {p.LossPercent:F0}% | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
         sb.AppendLine();
 
         sb.AppendLine("## HTTP / HTTPS 摘要");
         sb.AppendLine("| 路径 | URL | 结果 | 耗时 |");
         sb.AppendLine("|---|---|---|---:|");
         foreach (var h in httpResults)
-            sb.AppendLine($"| {Md(h.Mode)} | {Md(h.Url)} | {(h.Success ? $"HTTP {h.StatusCode}" : Md(h.Detail))} | {h.DurationMs} ms |");
+        {
+            string result = h.ResponseReceived
+                ? (h.Success ? $"HTTP {h.StatusCode}（正常）" : $"HTTP {h.StatusCode}（有响应但语义异常：{Md(h.Detail)}）")
+                : Md(h.Detail);
+            sb.AppendLine($"| {Md(h.Mode)} | {Md(h.Url)} | {result} | {h.DurationMs} ms |");
+        }
         sb.AppendLine();
 
         sb.AppendLine("## 5 秒接口流量采样");
@@ -1734,7 +1817,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         foreach (var r in records)
             sb.AppendLine($"| {r.Status} | {Md(r.Name)} | {Md(r.File)} | {r.DurationMs / 1000.0:F1}s |");
         sb.AppendLine();
-        sb.AppendLine("> 诊断包可能包含 IP/MAC、SSID/BSSID、DNS/代理/VPN 地址、活动连接、应用路径、SID、WFP 配置和网络事件。发送给第三方前请确认接收方可信。不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码或文件内容；DNS 缓存也默认不采集。");
+        sb.AppendLine("> 诊断包可能包含 IP/MAC、SSID/BSSID、DNS/代理/VPN 地址、活动连接、应用路径、SID、WFP 配置和网络事件。若启用 PktMon，128 字节截断仍可能包含 DNS 查询名、TLS SNI、HTTP 请求头片段等。发送给第三方前请确认接收方可信。不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码或文件内容；DNS 缓存也默认不采集。");
 
         WriteText(root, "SUMMARY.md", sb.ToString());
     }
@@ -1789,8 +1872,33 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             : "- 未包含抓包；如需要分析广播/ARP/异常流量，可在生成时勾选 PktMon。");
         sb.AppendLine();
         sb.AppendLine("隐私：包内可能出现 IP、MAC、SSID/BSSID、代理/VPN 服务器、进程名、应用路径、SID、活动连接和网络事件。");
-        sb.AppendLine("WFP XML 与事件日志可能包含本机应用路径或安全主体信息。不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码、文档内容或环境变量；DNS Cache 默认不采集。");
+        sb.AppendLine("WFP XML 与事件日志可能包含本机应用路径或安全主体信息。PktMon 的 128 字节截断仍可能包含 DNS 查询名、TLS SNI、HTTP 请求头片段、端口和 IP/MAC。不会主动采集 Wi-Fi 密码、浏览器 Cookie、VPN 密码、文档内容或环境变量；DNS Cache 默认不采集。");
         WriteText(root, "README.txt", sb.ToString());
+    }
+
+    private static void PreflightDiskSpace(string workDir, string zipPath, bool includesCapture)
+    {
+        long minimum = includesCapture ? 160L * 1024 * 1024 : 64L * 1024 * 1024;
+
+        static long? FreeBytesForPath(string path)
+        {
+            try
+            {
+                string? root = Path.GetPathRoot(Path.GetFullPath(path));
+                if (string.IsNullOrWhiteSpace(root) || root.StartsWith(@"\\", StringComparison.Ordinal))
+                    return null;
+                return new DriveInfo(root).AvailableFreeSpace;
+            }
+            catch { return null; }
+        }
+
+        long? tempFree = FreeBytesForPath(workDir);
+        if (tempFree.HasValue && tempFree.Value < minimum)
+            throw new IOException($"临时目录所在磁盘可用空间不足：至少需要约 {minimum / 1024 / 1024} MiB。");
+
+        long? destFree = FreeBytesForPath(zipPath);
+        if (destFree.HasValue && destFree.Value < minimum)
+            throw new IOException($"诊断包目标磁盘可用空间不足：至少需要约 {minimum / 1024 / 1024} MiB。");
     }
 
     private static void WriteText(string root, string relative, string text)
