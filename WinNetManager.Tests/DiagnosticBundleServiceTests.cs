@@ -51,6 +51,74 @@ public class DiagnosticBundleServiceTests
     }
 
     [Fact]
+    public void RouteSelection_LoopbackIpv4_ReturnsSourceInterfaceAndMetrics()
+    {
+        var route = RouteSelectionService.Lookup(System.Net.IPAddress.Loopback);
+
+        Assert.True(route.Success, route.Error);
+        Assert.True(route.InterfaceIndex > 0);
+        Assert.False(string.IsNullOrWhiteSpace(route.BestSourceAddress));
+        Assert.False(string.IsNullOrWhiteSpace(route.DestinationPrefix));
+        Assert.Equal("IPv4", route.AddressFamily);
+
+        if (route.InterfaceMetric.HasValue)
+            Assert.Equal(route.RouteMetric + route.InterfaceMetric.Value, route.EffectiveMetric);
+    }
+
+    [Fact]
+    public void RouteSelection_LoopbackIpv6_ReturnsSourceInterface()
+    {
+        var route = RouteSelectionService.Lookup(System.Net.IPAddress.IPv6Loopback);
+
+        Assert.True(route.Success, route.Error);
+        Assert.True(route.InterfaceIndex > 0);
+        Assert.False(string.IsNullOrWhiteSpace(route.BestSourceAddress));
+        Assert.Equal("IPv6", route.AddressFamily);
+    }
+
+    [Fact]
+    public async Task HttpProbe_Direct_RecordsActualSocketEndpointsAndInterface()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+
+        var serverTask = Task.Run(async () =>
+        {
+            using var accepted = await listener.AcceptTcpClientAsync();
+            using var stream = accepted.GetStream();
+            var buffer = new byte[4096];
+            _ = await stream.ReadAsync(buffer);
+            byte[] response = System.Text.Encoding.ASCII.GetBytes(
+                "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(response);
+            await stream.FlushAsync();
+        });
+
+        try
+        {
+            var result = DiagnosticBundleService.HttpProbe(
+                $"http://127.0.0.1:{port}/",
+                useProxy: false,
+                CancellationToken.None);
+
+            Assert.True(result.ResponseReceived, result.Detail);
+            Assert.True(result.Success, result.Detail);
+            Assert.False(string.IsNullOrWhiteSpace(result.TransportLocalEndpoint));
+            Assert.False(string.IsNullOrWhiteSpace(result.TransportRemoteEndpoint));
+            Assert.False(string.IsNullOrWhiteSpace(result.ActualLocalInterface));
+            Assert.NotNull(result.Route);
+            Assert.True(result.Route!.Success, result.Route.Error);
+
+            await serverTask;
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
     public void AnalyzeConnectivity_DoesNotClaimGatewayReachable_WhenNoGatewayExists()
     {
         var findings = new List<string>();

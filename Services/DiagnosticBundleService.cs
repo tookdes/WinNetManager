@@ -67,6 +67,7 @@ internal sealed class PingProbeResult
     public string ResolvedAddress { get; set; } = "";
     public string DnsStatus { get; set; } = "";
     public string Error { get; set; } = "";
+    public RouteSelectionInfo? Route { get; set; }
     public double LossPercent => Sent <= 0 ? double.NaN : (Sent - Received) * 100.0 / Sent;
 }
 
@@ -79,6 +80,11 @@ internal sealed class HttpProbeResult
     public int StatusCode { get; set; }
     public long DurationMs { get; set; }
     public string Detail { get; set; } = "";
+    public string TransportLocalEndpoint { get; set; } = "";
+    public string TransportRemoteEndpoint { get; set; } = "";
+    public string ActualLocalInterface { get; set; } = "";
+    public uint? ActualLocalInterfaceIndex { get; set; }
+    public RouteSelectionInfo? Route { get; set; }
 }
 
 internal sealed class TrafficSnapshot
@@ -268,6 +274,11 @@ public static class DiagnosticBundleService
                     if (IsStepError(record.Status)) errorCount++;
                 }
             }
+
+            progress?.Report("整理主动探测的源地址 / 出口网卡 / 路由证据...");
+            var routeRecord = WriteRouteAttribution(workDir, pingResults, httpResults);
+            records.Add(routeRecord);
+            if (IsStepError(routeRecord.Status)) errorCount++;
 
             progress?.Report("检查近期 IP 冲突与网络事件...");
             try
@@ -1520,11 +1531,17 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var results = Task.WhenAll(pingTasks).GetAwaiter().GetResult().ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine("Target\tKind\tResolvedAddress\tDnsStatus\tSent\tReceived\tLoss%\tMinMs\tAvgMs\tMaxMs\tError");
+        sb.AppendLine("Target\tKind\tResolvedAddress\tDnsStatus\tRouteSource\tRouteInterfaceIndex\tRouteInterface\tNextHop\tRoutePrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tSent\tReceived\tLoss%\tMinMs\tAvgMs\tMaxMs\tError");
         foreach (var r in results)
         {
             string loss = double.IsNaN(r.LossPercent) ? "" : r.LossPercent.ToString("F1");
-            sb.AppendLine($"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{EscapeTsv(r.DnsStatus)}\t{r.Sent}\t{r.Received}\t{loss}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
+            var route = r.Route;
+            sb.AppendLine(
+                $"{EscapeTsv(r.Target)}\t{EscapeTsv(r.Kind)}\t{EscapeTsv(r.ResolvedAddress)}\t{EscapeTsv(r.DnsStatus)}\t" +
+                $"{EscapeTsv(route?.BestSourceAddress ?? "")}\t{(route?.InterfaceIndex.ToString() ?? "")}\t{EscapeTsv(route?.InterfaceName ?? "")}\t" +
+                $"{EscapeTsv(route?.NextHop ?? "")}\t{EscapeTsv(route?.DestinationPrefix ?? "")}\t{(route?.Success == true ? route.RouteMetric.ToString() : "")}\t" +
+                $"{(route?.InterfaceMetric?.ToString() ?? "")}\t{(route?.EffectiveMetric?.ToString() ?? "")}\t" +
+                $"{r.Sent}\t{r.Received}\t{loss}\t{r.MinMs}\t{r.AvgMs:F1}\t{r.MaxMs}\t{EscapeTsv(r.Error)}");
         }
         WriteText(root, "05-connectivity/ping-tests.tsv", sb.ToString());
 
@@ -1582,6 +1599,22 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 result.ResolvedAddress = target;
             }
 
+            if (IPAddress.TryParse(address, out var routeDestination))
+            {
+                try { result.Route = RouteSelectionService.Lookup(routeDestination); }
+                catch (Exception ex)
+                {
+                    result.Route = new RouteSelectionInfo
+                    {
+                        Success = false,
+                        LookupStage = "managed wrapper",
+                        Error = ex.Message,
+                        Destination = routeDestination.ToString(),
+                        AddressFamily = routeDestination.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6"
+                    };
+                }
+            }
+
             result.Sent = count;
             using var ping = new Ping();
             for (int i = 0; i < count; i++)
@@ -1633,14 +1666,22 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var results = Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine("Mode\tURL\tResponseReceived\tSuccess\tStatusCode\tDurationMs\tDetail");
+        sb.AppendLine("Mode\tURL\tResponseReceived\tSuccess\tStatusCode\tDurationMs\tTransportLocal\tActualLocalInterfaceIndex\tActualLocalInterface\tTransportRemote\tRouteSource\tRouteInterfaceIndex\tRouteInterface\tNextHop\tRoutePrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tDetail");
         foreach (var r in results)
-            sb.AppendLine($"{r.Mode}\t{EscapeTsv(r.Url)}\t{r.ResponseReceived}\t{r.Success}\t{r.StatusCode}\t{r.DurationMs}\t{EscapeTsv(r.Detail)}");
+        {
+            var route = r.Route;
+            sb.AppendLine(
+                $"{r.Mode}\t{EscapeTsv(r.Url)}\t{r.ResponseReceived}\t{r.Success}\t{r.StatusCode}\t{r.DurationMs}\t" +
+                $"{EscapeTsv(r.TransportLocalEndpoint)}\t{(r.ActualLocalInterfaceIndex?.ToString() ?? "")}\t{EscapeTsv(r.ActualLocalInterface)}\t{EscapeTsv(r.TransportRemoteEndpoint)}\t{EscapeTsv(route?.BestSourceAddress ?? "")}\t" +
+                $"{(route?.InterfaceIndex.ToString() ?? "")}\t{EscapeTsv(route?.InterfaceName ?? "")}\t{EscapeTsv(route?.NextHop ?? "")}\t" +
+                $"{EscapeTsv(route?.DestinationPrefix ?? "")}\t{(route?.Success == true ? route.RouteMetric.ToString() : "")}\t" +
+                $"{(route?.InterfaceMetric?.ToString() ?? "")}\t{(route?.EffectiveMetric?.ToString() ?? "")}\t{EscapeTsv(r.Detail)}");
+        }
         WriteText(root, "05-connectivity/http-tests.tsv", sb.ToString());
         return results;
     }
 
-    private static HttpProbeResult HttpProbe(string url, bool useProxy, CancellationToken cancellationToken)
+    internal static HttpProbeResult HttpProbe(string url, bool useProxy, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         var r = new HttpProbeResult
@@ -1651,12 +1692,64 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
         try
         {
-            using var handler = new HttpClientHandler
+            using var handler = new SocketsHttpHandler
             {
                 UseProxy = useProxy,
                 // Keep redirects visible: captive portals often reveal themselves as 30x here.
                 AllowAutoRedirect = false
             };
+
+            // Record the actual TCP transport selected by HttpClient. For direct requests this
+            // is the origin endpoint; with a system proxy it is normally the proxy transport.
+            // This avoids claiming that the route to the origin is the route actually used by
+            // a proxied request.
+            handler.ConnectCallback = async (context, token) =>
+            {
+                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+                try
+                {
+                    await socket.ConnectAsync(context.DnsEndPoint, token).ConfigureAwait(false);
+
+                    if (socket.LocalEndPoint is IPEndPoint local)
+                    {
+                        IPAddress localAddress = RouteSelectionService.NormalizeAddress(local.Address);
+                        r.TransportLocalEndpoint = new IPEndPoint(localAddress, local.Port).ToString();
+
+                        var localInterface = RouteSelectionService.FindInterfaceForLocalAddress(localAddress);
+                        if (localInterface != null)
+                        {
+                            r.ActualLocalInterface = localInterface.Display;
+                            r.ActualLocalInterfaceIndex = localInterface.InterfaceIndex;
+                        }
+                    }
+
+                    if (socket.RemoteEndPoint is IPEndPoint remote)
+                    {
+                        IPAddress remoteAddress = RouteSelectionService.NormalizeAddress(remote.Address);
+                        r.TransportRemoteEndpoint = new IPEndPoint(remoteAddress, remote.Port).ToString();
+                        try { r.Route = RouteSelectionService.Lookup(remoteAddress); }
+                        catch (Exception ex)
+                        {
+                            r.Route = new RouteSelectionInfo
+                            {
+                                Success = false,
+                                LookupStage = "managed wrapper",
+                                Error = ex.Message,
+                                Destination = remoteAddress.ToString(),
+                                AddressFamily = remoteAddress.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6"
+                            };
+                        }
+                    }
+
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+            };
+
             using var client = new HttpClient(handler);
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(7));
@@ -1766,10 +1859,28 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         bool tcpAttempted = endpointAddress != null;
         bool tcpConnected = false;
         string tcpDetail = "";
+        string tcpLocalEndpoint = "";
+        string tcpRemoteEndpoint = "";
+        string tcpActualLocalInterface = "";
+        uint? tcpActualLocalInterfaceIndex = null;
+        RouteSelectionInfo? tcpRoute = null;
         long tcpMs = 0;
 
         if (endpointAddress != null)
         {
+            try { tcpRoute = RouteSelectionService.Lookup(endpointAddress); }
+            catch (Exception ex)
+            {
+                tcpRoute = new RouteSelectionInfo
+                {
+                    Success = false,
+                    LookupStage = "managed wrapper",
+                    Error = ex.Message,
+                    Destination = endpointAddress.ToString(),
+                    AddressFamily = endpointAddress.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6"
+                };
+            }
+
             var tcpSw = Stopwatch.StartNew();
             try
             {
@@ -1778,6 +1889,22 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 timeoutCts.CancelAfter(TimeSpan.FromSeconds(4));
                 tcp.ConnectAsync(endpointAddress, port, timeoutCts.Token).AsTask().GetAwaiter().GetResult();
                 tcpConnected = tcp.Connected;
+                if (tcp.Client.LocalEndPoint is IPEndPoint local)
+                {
+                    IPAddress localAddress = RouteSelectionService.NormalizeAddress(local.Address);
+                    tcpLocalEndpoint = new IPEndPoint(localAddress, local.Port).ToString();
+                    var localInterface = RouteSelectionService.FindInterfaceForLocalAddress(localAddress);
+                    if (localInterface != null)
+                    {
+                        tcpActualLocalInterface = localInterface.Display;
+                        tcpActualLocalInterfaceIndex = localInterface.InterfaceIndex;
+                    }
+                }
+                if (tcp.Client.RemoteEndPoint is IPEndPoint remote)
+                {
+                    IPAddress remoteAddress = RouteSelectionService.NormalizeAddress(remote.Address);
+                    tcpRemoteEndpoint = new IPEndPoint(remoteAddress, remote.Port).ToString();
+                }
                 tcpDetail = tcpConnected ? "Connected" : "Connect returned without an established socket";
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1830,15 +1957,30 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine($"TCP attempted: {tcpAttempted}");
         sb.AppendLine($"TCP endpoint: {(endpointAddress == null ? "-" : endpointAddress.ToString())}:{port}");
         sb.AppendLine($"TCP connected: {tcpConnected}");
+        sb.AppendLine($"TCP actual local endpoint: {(string.IsNullOrWhiteSpace(tcpLocalEndpoint) ? "-" : tcpLocalEndpoint)}");
+        sb.AppendLine($"TCP actual local interface: {(string.IsNullOrWhiteSpace(tcpActualLocalInterface) ? "-" : tcpActualLocalInterface)}");
+        sb.AppendLine($"TCP actual local interface index: {(tcpActualLocalInterfaceIndex?.ToString() ?? "-")}");
+        sb.AppendLine($"TCP actual remote endpoint: {(string.IsNullOrWhiteSpace(tcpRemoteEndpoint) ? "-" : tcpRemoteEndpoint)}");
         sb.AppendLine($"TCP duration: {tcpMs} ms");
         sb.AppendLine($"TCP detail: {tcpDetail}");
+        AppendRouteSelection(sb, "TCP route lookup", tcpRoute);
         if (url != null)
         {
             sb.AppendLine($"URL: {url}");
             if (customDirect != null)
+            {
                 sb.AppendLine($"HTTP direct: response={customDirect.ResponseReceived}, status={customDirect.StatusCode}, success={customDirect.Success}, detail={customDirect.Detail}");
+                sb.AppendLine($"HTTP direct transport: {customDirect.TransportLocalEndpoint} -> {customDirect.TransportRemoteEndpoint}");
+                sb.AppendLine($"HTTP direct actual local interface: {customDirect.ActualLocalInterface}");
+                AppendRouteSelection(sb, "HTTP direct transport route", customDirect.Route);
+            }
             if (customProxy != null)
+            {
                 sb.AppendLine($"HTTP system-proxy: response={customProxy.ResponseReceived}, status={customProxy.StatusCode}, success={customProxy.Success}, detail={customProxy.Detail}");
+                sb.AppendLine($"HTTP system-proxy transport: {customProxy.TransportLocalEndpoint} -> {customProxy.TransportRemoteEndpoint}");
+                sb.AppendLine($"HTTP system-proxy actual local interface: {customProxy.ActualLocalInterface}");
+                AppendRouteSelection(sb, "HTTP proxy/default transport route", customProxy.Route);
+            }
         }
 
         WriteText(root, "05-connectivity/custom-target.txt", sb.ToString());
@@ -1895,12 +2037,99 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         return records;
     }
 
+    private static void AppendRouteSelection(StringBuilder sb, string label, RouteSelectionInfo? route)
+    {
+        sb.AppendLine($"=== {label} ===");
+        if (route == null)
+        {
+            sb.AppendLine("Route lookup: unavailable");
+            return;
+        }
+
+        sb.AppendLine($"Route lookup success: {route.Success}");
+        sb.AppendLine($"Destination: {route.Destination}");
+        sb.AppendLine($"Best source: {route.BestSourceAddress}");
+        sb.AppendLine($"Interface: {route.InterfaceDisplay}");
+        if (!string.IsNullOrWhiteSpace(route.InterfaceDescription))
+            sb.AppendLine($"Interface description: {route.InterfaceDescription}");
+        sb.AppendLine($"Next hop: {(string.IsNullOrWhiteSpace(route.NextHop) ? "on-link / unspecified" : route.NextHop)}");
+        sb.AppendLine($"Destination prefix: {route.DestinationPrefix}");
+        sb.AppendLine($"Route metric: {(route.Success ? route.RouteMetric.ToString() : "-")}");
+        sb.AppendLine($"Interface metric: {(route.InterfaceMetric?.ToString() ?? "-")}");
+        sb.AppendLine($"Effective metric: {(route.EffectiveMetric?.ToString() ?? "-")}");
+        if (!string.IsNullOrWhiteSpace(route.Error))
+            sb.AppendLine($"Route lookup note/error: {route.Error}");
+    }
+
     private static IPAddress[] ResolveHostWithTimeout(string host, int timeoutMs, CancellationToken cancellationToken = default)
     {
         var task = Dns.GetHostAddressesAsync(host);
         if (!task.Wait(timeoutMs, cancellationToken))
             throw new TimeoutException($"DNS resolution timed out after {timeoutMs} ms: {host}");
         return task.GetAwaiter().GetResult();
+    }
+
+    private static DiagnosticStepRecord WriteRouteAttribution(
+        string root,
+        List<PingProbeResult> pingResults,
+        List<HttpProbeResult> httpResults)
+    {
+        const string relative = "05-connectivity/route-attribution.tsv";
+        var sb = new StringBuilder();
+        sb.AppendLine("Probe\tMode\tTarget\tRouteDestination\tActualLocalEndpoint\tActualLocalInterfaceIndex\tActualLocalInterface\tActualRemoteEndpoint\tAddressFamily\tRouteLookup\tBestSource\tRouteInterfaceIndex\tRouteInterface\tRouteInterfaceDescription\tNextHop\tDestinationPrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tNote");
+
+        int rows = 0;
+
+        foreach (var p in pingResults)
+        {
+            var r = p.Route;
+            if (r == null)
+                continue;
+
+            rows++;
+            sb.AppendLine(
+                $"Ping\t{EscapeTsv(p.Kind)}\t{EscapeTsv(p.Target)}\t{EscapeTsv(r.Destination)}\t\t\t\t\t" +
+                $"{EscapeTsv(r.AddressFamily)}\t{(r.Success ? "OK" : "FAIL")}\t{EscapeTsv(r.BestSourceAddress)}\t{r.InterfaceIndex}\t" +
+                $"{EscapeTsv(r.InterfaceName)}\t{EscapeTsv(r.InterfaceDescription)}\t{EscapeTsv(r.NextHop)}\t{EscapeTsv(r.DestinationPrefix)}\t" +
+                $"{(r.Success ? r.RouteMetric.ToString() : "")}\t{(r.InterfaceMetric?.ToString() ?? "")}\t{(r.EffectiveMetric?.ToString() ?? "")}\t" +
+                $"{EscapeTsv(r.Error)}");
+        }
+
+        foreach (var h in httpResults)
+        {
+            var r = h.Route;
+            if (r == null && string.IsNullOrWhiteSpace(h.TransportRemoteEndpoint))
+                continue;
+
+            rows++;
+            string note = h.Mode.StartsWith("System proxy", StringComparison.Ordinal)
+                ? "Actual transport remote may be the system proxy rather than the origin URL."
+                : "Actual TCP transport captured by SocketsHttpHandler.";
+
+            if (r != null && !string.IsNullOrWhiteSpace(r.Error))
+                note += " " + r.Error;
+
+            sb.AppendLine(
+                $"HTTP\t{EscapeTsv(h.Mode)}\t{EscapeTsv(h.Url)}\t{EscapeTsv(r?.Destination ?? "")}\t" +
+                $"{EscapeTsv(h.TransportLocalEndpoint)}\t{(h.ActualLocalInterfaceIndex?.ToString() ?? "")}\t{EscapeTsv(h.ActualLocalInterface)}\t{EscapeTsv(h.TransportRemoteEndpoint)}\t{EscapeTsv(r?.AddressFamily ?? "")}\t" +
+                $"{(r == null ? "" : r.Success ? "OK" : "FAIL")}\t{EscapeTsv(r?.BestSourceAddress ?? "")}\t{(r?.InterfaceIndex.ToString() ?? "")}\t" +
+                $"{EscapeTsv(r?.InterfaceName ?? "")}\t{EscapeTsv(r?.InterfaceDescription ?? "")}\t{EscapeTsv(r?.NextHop ?? "")}\t" +
+                $"{EscapeTsv(r?.DestinationPrefix ?? "")}\t{(r?.Success == true ? r.RouteMetric.ToString() : "")}\t" +
+                $"{(r?.InterfaceMetric?.ToString() ?? "")}\t{(r?.EffectiveMetric?.ToString() ?? "")}\t{EscapeTsv(note)}");
+        }
+
+        WriteText(root, relative, sb.ToString());
+
+        return new DiagnosticStepRecord
+        {
+            Name = "整理主动探测路由归因",
+            File = relative,
+            Status = rows > 0 ? "OK" : "EMPTY",
+            ExitCode = 0,
+            Error = rows > 0
+                ? ""
+                : "没有可归因的主动探测路由结果（例如 DNS 在发送探测前已失败）。"
+        };
     }
 
     private static int ReadRecentIpConflictCount(string root)
@@ -2410,26 +2639,35 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine();
 
         sb.AppendLine("## Ping 摘要");
-        sb.AppendLine("| 目标 | 类型 | DNS | 收/发 | 丢包 | 平均延迟 |");
-        sb.AppendLine("|---|---|---|---:|---:|---:|");
+        sb.AppendLine("| 目标 | 类型 | DNS | 路由源地址 | 出口网卡 | 下一跳 | 收/发 | 丢包 | 平均延迟 |");
+        sb.AppendLine("|---|---|---|---|---|---|---:|---:|---:|");
         foreach (var p in pingResults)
         {
             string loss = double.IsNaN(p.LossPercent) ? "-" : $"{p.LossPercent:F0}%";
             string sentReceived = p.Sent <= 0 ? "未发送" : $"{p.Received}/{p.Sent}";
-            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {Md(string.IsNullOrWhiteSpace(p.DnsStatus) ? "-" : p.DnsStatus)} | {sentReceived} | {loss} | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
+            string source = p.Route?.BestSourceAddress ?? "-";
+            string iface = p.Route?.InterfaceDisplay ?? "-";
+            string nextHop = string.IsNullOrWhiteSpace(p.Route?.NextHop) ? "on-link" : p.Route!.NextHop;
+            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {Md(string.IsNullOrWhiteSpace(p.DnsStatus) ? "-" : p.DnsStatus)} | {Md(source)} | {Md(iface)} | {Md(nextHop)} | {sentReceived} | {loss} | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
         }
         sb.AppendLine();
 
         sb.AppendLine("## HTTP / HTTPS 摘要");
-        sb.AppendLine("| 路径 | URL | 结果 | 耗时 |");
-        sb.AppendLine("|---|---|---|---:|");
+        sb.AppendLine("| 路径 | URL | 实际本地端点 | 实际源接口 | 实际远端端点 | 路由出口网卡 | 结果 | 耗时 |");
+        sb.AppendLine("|---|---|---|---|---|---|---|---:|");
         foreach (var h in httpResults)
         {
             string result = h.ResponseReceived
                 ? (h.Success ? $"HTTP {h.StatusCode}（正常）" : $"HTTP {h.StatusCode}（有响应但语义异常：{Md(h.Detail)}）")
                 : Md(h.Detail);
-            sb.AppendLine($"| {Md(h.Mode)} | {Md(h.Url)} | {result} | {h.DurationMs} ms |");
+            sb.AppendLine($"| {Md(h.Mode)} | {Md(h.Url)} | {Md(string.IsNullOrWhiteSpace(h.TransportLocalEndpoint) ? "-" : h.TransportLocalEndpoint)} | {Md(string.IsNullOrWhiteSpace(h.ActualLocalInterface) ? "-" : h.ActualLocalInterface)} | {Md(string.IsNullOrWhiteSpace(h.TransportRemoteEndpoint) ? "-" : h.TransportRemoteEndpoint)} | {Md(h.Route?.InterfaceDisplay ?? "-")} | {result} | {h.DurationMs} ms |");
         }
+        sb.AppendLine();
+
+        sb.AppendLine("## 路由选择 / 源接口证据");
+        sb.AppendLine("- Ping 的源地址、接口、下一跳来自探测时刻的 Windows IP Helper 路由选择（GetBestInterfaceEx + GetBestRoute2）；它表示操作系统当时将选择的路径，不等同于抓包确认的 ICMP 源地址。");
+        sb.AppendLine("- HTTP/HTTPS 额外记录了实际建立 TCP 连接后的 LocalEndPoint / RemoteEndPoint；路由归因针对这个实际远端。系统代理路径中的实际远端可能是代理服务器，而不是 URL 原站。");
+        sb.AppendLine("- 完整的目标前缀、Route Metric、Interface Metric、Effective Metric 与接口描述见 05-connectivity/route-attribution.tsv；用户指定目标的 TCP 实际端点也写入 custom-target.txt。");
         sb.AppendLine();
 
         sb.AppendLine("## 5 秒接口流量采样");
@@ -2511,8 +2749,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("- 全部网卡、驱动、绑定、高级属性、IPv4/IPv6、DHCP、网关、MTU、跃点");
         sb.AppendLine("- 活动与持久路由、ARP/IPv6 Neighbor");
         sb.AppendLine("- DNS、NRPT、Hosts、系统解析与逐 DNS 服务器解析测试");
-        sb.AppendLine("- 网关/公共 IPv4/IPv6/常用域名 Ping 与丢包");
-        sb.AppendLine("- HTTP/HTTPS 直连与系统代理路径");
+        sb.AppendLine("- 网关/公共 IPv4/IPv6/常用域名 Ping 与丢包，并记录 Windows 路由选择的源地址/出口网卡/下一跳/Metric");
+        sb.AppendLine("- HTTP/HTTPS 直连与系统代理路径，并记录实际 TCP LocalEndPoint/RemoteEndPoint 和对应出口路由");
         sb.AppendLine("- IPv4/IPv6 条件化并发 Traceroute；如界面填写了目标/端口，还会额外测试该故障目标的 DNS/Ping/TCP/HTTP/Traceroute");
         sb.AppendLine("- TCP 动态/排除端口范围、连接表、监听端点");
         sb.AppendLine("- WinINET/PAC、VPN、网络接管软件、Winsock、完整 WFP state/filters、驱动线索");
