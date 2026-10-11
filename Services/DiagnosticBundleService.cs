@@ -252,6 +252,7 @@ public static class DiagnosticBundleService
             AnalyzeConnectivity(findings, pingResults, httpResults, ref warningCount);
             AnalyzeTcpPortPressure(findings, ref warningCount);
             AddStructuralFindings(findings, pingResults, ref warningCount);
+            AddCollectionIntegrityFindings(findings, records, ref warningCount);
 
             if (options.IncludePacketCapture)
             {
@@ -353,6 +354,34 @@ $cs | Format-List * | Out-String -Width 4096
 "=== BIOS ==="
 $bios | Format-List * | Out-String -Width 4096
 """, 15000),
+
+            ("00-summary/subsystem-health.txt", "检查诊断依赖的系统子系统", """
+$issues = New-Object System.Collections.Generic.List[string]
+"=== Critical services ==="
+foreach ($name in @('Winmgmt','EventLog','BFE')) {
+  try {
+    $s = Get-Service -Name $name -ErrorAction Stop
+    [pscustomobject]@{ Name=$s.Name; Status=$s.Status; StartType=$s.StartType } |
+      Format-Table -AutoSize | Out-String -Width 4096
+    if ($s.Status -ne 'Running') { $issues.Add("$name service is $($s.Status)") }
+  } catch {
+    $issues.Add("$name service query failed: $($_.Exception.Message)")
+  }
+}
+"=== Required cmdlets ==="
+foreach ($cmd in @('Get-NetAdapter','Get-NetIPAddress','Get-NetRoute','Get-NetTCPConnection','Get-WinEvent')) {
+  $present = [bool](Get-Command $cmd -ErrorAction SilentlyContinue)
+  [pscustomobject]@{ Command=$cmd; Present=$present } |
+    Format-Table -AutoSize | Out-String -Width 4096
+  if (-not $present) { $issues.Add("$cmd is unavailable") }
+}
+if ($issues.Count -gt 0) {
+  "=== ISSUES ==="
+  $issues
+  exit 2
+}
+"All critical diagnostic subsystems are available."
+""", 12000),
 
             ("01-system/hotfixes.txt", "收集最近 Windows 更新", """
 Get-HotFix -ErrorAction SilentlyContinue |
@@ -1476,6 +1505,32 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 findings.Add("[警告] ICMP 公网目标可达，但直连和系统代理 HTTP/HTTPS 均失败：重点检查 DNS、TCP/443、TLS、透明过滤或防火墙。");
                 warningCount++;
             }
+        }
+    }
+
+    private static void AddCollectionIntegrityFindings(
+        List<string> findings,
+        List<DiagnosticStepRecord> records,
+        ref int warningCount)
+    {
+        var subsystem = records.FirstOrDefault(r =>
+            string.Equals(r.File, "00-summary/subsystem-health.txt", StringComparison.OrdinalIgnoreCase));
+        if (subsystem?.Status == "WARN")
+        {
+            findings.Add("[警告] 诊断依赖的 Winmgmt/EventLog/BFE 或核心 Get-Net* cmdlet 存在异常；部分 PowerShell/CIM/WFP/事件采集可能不完整，请优先查看 00-summary/subsystem-health.txt，并以 ipconfig/route/netsh/netstat 等原生命令文件交叉验证。");
+            warningCount++;
+        }
+
+        int psWarnings = records.Count(r =>
+            r.Status == "WARN" &&
+            (r.File.StartsWith("02-adapters/", StringComparison.OrdinalIgnoreCase) ||
+             r.File.StartsWith("03-routing/", StringComparison.OrdinalIgnoreCase) ||
+             r.File.StartsWith("09-connections/", StringComparison.OrdinalIgnoreCase) ||
+             r.File.StartsWith("10-events/", StringComparison.OrdinalIgnoreCase)));
+
+        if (psWarnings >= 5)
+        {
+            findings.Add($"[提示] 核心采集步骤中有 {psWarnings} 项异常/超时；这更像是采集子系统受限，而不应把空输出直接解读为“配置不存在”。");
         }
     }
 
