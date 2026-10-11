@@ -1770,14 +1770,16 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             tcpDetail = "Skipped because the target did not resolve to an IP address.";
         }
 
+        HttpProbeResult? customDirect = null;
+        HttpProbeResult? customProxy = null;
         if (url != null)
         {
-            var direct = HttpProbe(url, useProxy: false, cancellationToken);
-            var proxied = HttpProbe(url, useProxy: true, cancellationToken);
-            httpResults.Add(direct);
-            httpResults.Add(proxied);
+            customDirect = HttpProbe(url, useProxy: false, cancellationToken);
+            customProxy = HttpProbe(url, useProxy: true, cancellationToken);
+            httpResults.Add(customDirect);
+            httpResults.Add(customProxy);
 
-            if (!direct.ResponseReceived && !proxied.ResponseReceived && tcpConnected)
+            if (!customDirect.ResponseReceived && !customProxy.ResponseReceived && tcpConnected)
             {
                 findings.Add($"[警告] 用户指定目标 {host}:{port} TCP 可连接，但 URL {url} 的直连和系统代理 HTTP(S) 均未收到响应：重点检查 TLS、HTTP、SNI、证书或应用层过滤。");
                 warningCount++;
@@ -1798,7 +1800,13 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine($"TCP duration: {tcpMs} ms");
         sb.AppendLine($"TCP detail: {tcpDetail}");
         if (url != null)
+        {
             sb.AppendLine($"URL: {url}");
+            if (customDirect != null)
+                sb.AppendLine($"HTTP direct: response={customDirect.ResponseReceived}, status={customDirect.StatusCode}, success={customDirect.Success}, detail={customDirect.Detail}");
+            if (customProxy != null)
+                sb.AppendLine($"HTTP system-proxy: response={customProxy.ResponseReceived}, status={customProxy.StatusCode}, success={customProxy.Success}, detail={customProxy.Detail}");
+        }
 
         WriteText(root, "05-connectivity/custom-target.txt", sb.ToString());
         sw.Stop();
