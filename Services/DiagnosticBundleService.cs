@@ -164,11 +164,9 @@ public static class DiagnosticBundleService
             }
 
             var psSteps = BuildPowerShellSteps();
-            foreach (var step in psSteps)
+            foreach (var record in RunPowerShellStepsBounded(
+                         workDir, psSteps, progress, cancellationToken, maxDegreeOfParallelism: 3))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                progress?.Report(step.Name);
-                var record = RunPowerShellStep(workDir, step.File, step.Name, step.Script, step.TimeoutMs, cancellationToken);
                 records.Add(record);
                 if (IsStepError(record.Status)) errorCount++;
             }
@@ -961,6 +959,37 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             ("09-connections/netstat-ano.txt", "运行 netstat -ano", "netstat.exe", "-ano", 20000),
             ("01-system/time-sync.txt", "检查 Windows 时间同步", "w32tm.exe", "/query /status", 10000)
         };
+    }
+
+    private static List<DiagnosticStepRecord> RunPowerShellStepsBounded(
+        string root,
+        List<(string File, string Name, string Script, int TimeoutMs)> steps,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken,
+        int maxDegreeOfParallelism)
+    {
+        using var gate = new SemaphoreSlim(Math.Max(1, maxDegreeOfParallelism));
+
+        var tasks = steps.Select(async step =>
+        {
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(step.Name);
+                return await Task.Run(
+                    () => RunPowerShellStep(
+                        root, step.File, step.Name, step.Script, step.TimeoutMs, cancellationToken),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToArray();
+
+        // Task.WhenAll preserves input ordering, so SUMMARY remains deterministic.
+        return Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
     }
 
     private static DiagnosticStepRecord RunPowerShellStep(
