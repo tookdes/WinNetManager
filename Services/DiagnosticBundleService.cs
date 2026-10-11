@@ -1861,6 +1861,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         string tcpDetail = "";
         string tcpLocalEndpoint = "";
         string tcpRemoteEndpoint = "";
+        string tcpActualLocalInterface = "";
+        uint? tcpActualLocalInterfaceIndex = null;
         RouteSelectionInfo? tcpRoute = null;
         long tcpMs = 0;
 
@@ -1888,9 +1890,21 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 tcp.ConnectAsync(endpointAddress, port, timeoutCts.Token).AsTask().GetAwaiter().GetResult();
                 tcpConnected = tcp.Connected;
                 if (tcp.Client.LocalEndPoint is IPEndPoint local)
-                    tcpLocalEndpoint = local.ToString();
+                {
+                    IPAddress localAddress = RouteSelectionService.NormalizeAddress(local.Address);
+                    tcpLocalEndpoint = new IPEndPoint(localAddress, local.Port).ToString();
+                    var localInterface = RouteSelectionService.FindInterfaceForLocalAddress(localAddress);
+                    if (localInterface != null)
+                    {
+                        tcpActualLocalInterface = localInterface.Display;
+                        tcpActualLocalInterfaceIndex = localInterface.InterfaceIndex;
+                    }
+                }
                 if (tcp.Client.RemoteEndPoint is IPEndPoint remote)
-                    tcpRemoteEndpoint = remote.ToString();
+                {
+                    IPAddress remoteAddress = RouteSelectionService.NormalizeAddress(remote.Address);
+                    tcpRemoteEndpoint = new IPEndPoint(remoteAddress, remote.Port).ToString();
+                }
                 tcpDetail = tcpConnected ? "Connected" : "Connect returned without an established socket";
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1944,6 +1958,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine($"TCP endpoint: {(endpointAddress == null ? "-" : endpointAddress.ToString())}:{port}");
         sb.AppendLine($"TCP connected: {tcpConnected}");
         sb.AppendLine($"TCP actual local endpoint: {(string.IsNullOrWhiteSpace(tcpLocalEndpoint) ? "-" : tcpLocalEndpoint)}");
+        sb.AppendLine($"TCP actual local interface: {(string.IsNullOrWhiteSpace(tcpActualLocalInterface) ? "-" : tcpActualLocalInterface)}");
+        sb.AppendLine($"TCP actual local interface index: {(tcpActualLocalInterfaceIndex?.ToString() ?? "-")}");
         sb.AppendLine($"TCP actual remote endpoint: {(string.IsNullOrWhiteSpace(tcpRemoteEndpoint) ? "-" : tcpRemoteEndpoint)}");
         sb.AppendLine($"TCP duration: {tcpMs} ms");
         sb.AppendLine($"TCP detail: {tcpDetail}");
@@ -1955,12 +1971,14 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             {
                 sb.AppendLine($"HTTP direct: response={customDirect.ResponseReceived}, status={customDirect.StatusCode}, success={customDirect.Success}, detail={customDirect.Detail}");
                 sb.AppendLine($"HTTP direct transport: {customDirect.TransportLocalEndpoint} -> {customDirect.TransportRemoteEndpoint}");
+                sb.AppendLine($"HTTP direct actual local interface: {customDirect.ActualLocalInterface}");
                 AppendRouteSelection(sb, "HTTP direct transport route", customDirect.Route);
             }
             if (customProxy != null)
             {
                 sb.AppendLine($"HTTP system-proxy: response={customProxy.ResponseReceived}, status={customProxy.StatusCode}, success={customProxy.Success}, detail={customProxy.Detail}");
                 sb.AppendLine($"HTTP system-proxy transport: {customProxy.TransportLocalEndpoint} -> {customProxy.TransportRemoteEndpoint}");
+                sb.AppendLine($"HTTP system-proxy actual local interface: {customProxy.ActualLocalInterface}");
                 AppendRouteSelection(sb, "HTTP proxy/default transport route", customProxy.Route);
             }
         }
