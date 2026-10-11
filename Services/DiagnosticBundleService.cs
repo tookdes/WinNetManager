@@ -1045,18 +1045,54 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     {
         bool publicIpv4Responded = pings.Any(p =>
             p.Kind.StartsWith("Public IPv4", StringComparison.Ordinal) && p.Received > 0);
+        bool publicIpv6Responded = pings.Any(p =>
+            p.Kind.StartsWith("Public IPv6", StringComparison.Ordinal) && p.Received > 0);
 
-        if (!publicIpv4Responded && !HasUsableIpv4DefaultRoute())
+        // Do not require a gateway object: PPPoE/on-link/default-route implementations can
+        // have a usable path without exposing a conventional next-hop in GatewayAddresses.
+        bool tryIpv4 = publicIpv4Responded || HasUsableIpv4Address();
+        bool tryIpv6 = publicIpv6Responded || HasUsableGlobalIpv6Address();
+
+        var targets = new List<(string Target, string File, string Name, string FamilyArg)>();
+        if (tryIpv4)
         {
-            const string reason =
-                "跳过公网 Traceroute：当前没有可用 IPv4 默认网关，且公共 IPv4 Ping 无响应。此时 Traceroute 对定位 DHCP/APIPA/本地链路故障价值较低。";
-            WriteText(root, "05-connectivity/traceroute-skipped.txt", reason);
+            targets.Add(("223.5.5.5",
+                "05-connectivity/traceroute-223.5.5.5.txt",
+                "IPv4 Traceroute 到阿里 DNS 223.5.5.5",
+                "-4"));
+            targets.Add(("1.1.1.1",
+                "05-connectivity/traceroute-1.1.1.1.txt",
+                "IPv4 Traceroute 到 1.1.1.1",
+                "-4"));
+        }
+        else
+        {
+            WriteText(root, "05-connectivity/traceroute-ipv4-skipped.txt",
+                "跳过 IPv4 Traceroute：未检测到可用非 APIPA IPv4 地址，且公共 IPv4 Ping 无响应。");
+        }
+
+        if (tryIpv6)
+        {
+            targets.Add(("2400:3200::1",
+                "05-connectivity/traceroute-ipv6-2400-3200--1.txt",
+                "IPv6 Traceroute 到阿里 DNS 2400:3200::1",
+                "-6"));
+        }
+        else
+        {
+            WriteText(root, "05-connectivity/traceroute-ipv6-skipped.txt",
+                "跳过 IPv6 Traceroute：未检测到 2000::/3 全局单播 IPv6 地址，且公共 IPv6 Ping 无响应。");
+        }
+
+        if (targets.Count == 0)
+        {
+            const string reason = "IPv4/IPv6 均无可用路径候选，已跳过公网 Traceroute。";
             return new List<DiagnosticStepRecord>
             {
                 new()
                 {
                     Name = "公网 Traceroute",
-                    File = "05-connectivity/traceroute-skipped.txt",
+                    File = "05-connectivity/traceroute-ipv4-skipped.txt",
                     Status = "SKIP",
                     ExitCode = 0,
                     Error = reason
@@ -1064,21 +1100,17 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             };
         }
 
-        var targets = new[]
-        {
-            (Target: "223.5.5.5", File: "05-connectivity/traceroute-223.5.5.5.txt", Name: "Traceroute 到阿里 DNS 223.5.5.5"),
-            (Target: "1.1.1.1", File: "05-connectivity/traceroute-1.1.1.1.txt", Name: "Traceroute 到 1.1.1.1")
-        };
-
-        // -d 避免逐跳反向 DNS；12 hops * 3 probes * 400ms，完全断网时单条约 15 秒封顶。
+        // -d avoids reverse-DNS per hop; bounded hop/wait values keep broken links from
+        // dominating the diagnostic runtime.
         var tasks = targets.Select(t => Task.Run(() =>
             RunNativeStep(root, t.File, t.Name, "tracert.exe",
-                $"-d -h 12 -w 400 {t.Target}", 20000, cancellationToken), cancellationToken)).ToArray();
+                $"{t.FamilyArg} -d -h 12 -w 400 {t.Target}", 20000, cancellationToken),
+            cancellationToken)).ToArray();
 
         return Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
     }
 
-    private static bool HasUsableIpv4DefaultRoute()
+    private static bool HasUsableIpv4Address()
     {
         foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
         {
@@ -1088,26 +1120,39 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
             try
             {
-                var props = ni.GetIPProperties();
-                bool hasUsableV4 = props.UnicastAddresses.Any(a =>
+                bool usable = ni.GetIPProperties().UnicastAddresses.Any(a =>
                 {
                     if (a.Address.AddressFamily != AddressFamily.InterNetwork ||
                         IPAddress.IsLoopback(a.Address))
                         return false;
+
                     byte[] b = a.Address.GetAddressBytes();
                     return !(b.Length == 4 && b[0] == 169 && b[1] == 254);
                 });
 
-                bool hasGateway = props.GatewayAddresses.Any(g =>
-                    g.Address.AddressFamily == AddressFamily.InterNetwork &&
-                    !g.Address.Equals(IPAddress.Any));
-
-                if (hasUsableV4 && hasGateway)
+                if (usable)
                     return true;
             }
             catch { }
         }
+        return false;
+    }
 
+    private static bool HasUsableGlobalIpv6Address()
+    {
+        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up ||
+                ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                continue;
+
+            try
+            {
+                if (ni.GetIPProperties().UnicastAddresses.Any(a => IsGlobalUnicastIpv6(a.Address)))
+                    return true;
+            }
+            catch { }
+        }
         return false;
     }
 
