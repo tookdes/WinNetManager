@@ -120,7 +120,9 @@ public static class DiagnosticBundleService
         CancellationToken userCancellationToken = default)
     {
         options ??= new DiagnosticBundleOptions();
+        options.PacketCaptureSeconds = Math.Clamp(options.PacketCaptureSeconds, 5, 60);
         int budgetSeconds = Math.Clamp(options.TotalBudgetSeconds, 60, 600);
+        options.TotalBudgetSeconds = budgetSeconds;
         using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(userCancellationToken);
         budgetCts.CancelAfter(TimeSpan.FromSeconds(budgetSeconds));
         CancellationToken cancellationToken = budgetCts.Token;
@@ -2338,6 +2340,9 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine($"- WinNetManager：{Assembly.GetExecutingAssembly().GetName().Version}");
         sb.AppendLine($"- 管理员权限：{(IsAdministrator() ? "是" : "否（部分系统级采集可能降级）")}");
         sb.AppendLine($"- PktMon 抓包：{(options.IncludePacketCapture ? $"是（{options.PacketCaptureSeconds} 秒）" : "否")}");
+        sb.AppendLine($"- 总时间预算：{options.TotalBudgetSeconds} 秒");
+        if (!string.IsNullOrWhiteSpace(options.CustomTarget))
+            sb.AppendLine($"- 用户指定故障目标：{options.CustomTarget}" + (options.CustomPort.HasValue ? $" / 端口 {options.CustomPort}" : ""));
         sb.AppendLine();
 
         sb.AppendLine("## 自动判读");
@@ -2416,6 +2421,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             elevated = IsAdministrator(),
             packet_capture = options.IncludePacketCapture,
             packet_capture_seconds = options.PacketCaptureSeconds,
+            total_budget_seconds = options.TotalBudgetSeconds,
             custom_target = string.IsNullOrWhiteSpace(options.CustomTarget) ? null : options.CustomTarget,
             custom_port = options.CustomPort,
             steps = records.Select(r =>
@@ -2448,7 +2454,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("============================");
         sb.AppendLine();
         sb.AppendLine("用途：在无法远程连接目标电脑时，一次性采集网络故障定位所需的本机状态与链路证据。");
-        sb.AppendLine("此模式默认只读，不修改 DNS、IP、路由、防火墙，不重启网卡和服务。");
+        sb.AppendLine("此模式默认只读，不修改 DNS、IP、路由、防火墙，不重启网卡和服务；默认总时间预算 180 秒，可随时取消。");
         sb.AppendLine();
         sb.AppendLine("主要内容：");
         sb.AppendLine("- Windows / 更新 / 时间同步");
@@ -2457,10 +2463,11 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("- DNS、NRPT、Hosts、系统解析与逐 DNS 服务器解析测试");
         sb.AppendLine("- 网关/公共 IPv4/IPv6/常用域名 Ping 与丢包");
         sb.AppendLine("- HTTP/HTTPS 直连与系统代理路径");
-        sb.AppendLine("- 条件化并发 Traceroute、TCP 动态/排除端口范围、连接表、监听端点");
+        sb.AppendLine("- IPv4/IPv6 条件化并发 Traceroute；如界面填写了目标/端口，还会额外测试该故障目标的 DNS/Ping/TCP/HTTP/Traceroute");
+        sb.AppendLine("- TCP 动态/排除端口范围、连接表、监听端点");
         sb.AppendLine("- WinINET/PAC、VPN、网络接管软件、Winsock、完整 WFP state/filters、驱动线索");
-        sb.AppendLine("- 防火墙配置与启用规则");
-        sb.AppendLine("- DHCP 租约注册表、DHCP trace、最近 48 小时 DHCP/DNS/WLAN/网络/IP 冲突事件");
+        sb.AppendLine("- 防火墙配置、启用规则、阻止规则的地址/端口/程序过滤条件，以及 WFP/Firewall 事件");
+        sb.AppendLine("- DHCP 租约注册表、DHCP trace、最近 48 小时 DHCP/DNS/NLA/WLAN/802.1X/WFP/网络/IP 冲突事件");
         sb.AppendLine("- 5 秒网卡流量/错误/丢弃/非单播采样，用于发现拥塞或疑似广播风暴");
         sb.AppendLine(options.IncludePacketCapture
             ? $"- 额外包含 {options.PacketCaptureSeconds} 秒 PktMon 抓包（128 字节截断）。"
