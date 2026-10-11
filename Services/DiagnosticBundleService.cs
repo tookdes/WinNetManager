@@ -838,7 +838,7 @@ foreach ($log in $logs) {
 $start = (Get-Date).AddHours(-48)
 $logs = @('Microsoft-Windows-DNS-Client/Operational','System')
 foreach ($logName in $logs) {
-  $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
+  $log = Get-WinEvent -ListLog $logName -ErrorAction Ignore
   if (-not $log) { continue }
   "===== $logName ====="
   if (-not $log.IsEnabled) {
@@ -863,7 +863,7 @@ $logs = @(
   'Microsoft-Windows-Hyper-V-VmSwitch/Operational'
 )
 foreach ($logName in $logs) {
-  $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
+  $log = Get-WinEvent -ListLog $logName -ErrorAction Ignore
   "===== $logName ====="
   if (-not $log) {
     "Log not present."
@@ -892,7 +892,7 @@ $logs = @(
 )
 foreach ($logName in $logs) {
   "===== $logName ====="
-  $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
+  $log = Get-WinEvent -ListLog $logName -ErrorAction Ignore
   if (-not $log) {
     "Log not present."
     continue
