@@ -131,6 +131,7 @@ public static class DiagnosticBundleService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            PreflightDiskSpace(workDir, zipPath, options.IncludePacketCapture);
             WritePackageReadme(workDir, options);
 
             progress?.Report("收集系统与网络健康快照...");
@@ -356,16 +357,16 @@ $bios | Format-List * | Out-String -Width 4096
 """, 15000),
 
             ("00-summary/subsystem-health.txt", "检查诊断依赖的系统子系统", """
-$issues = New-Object System.Collections.Generic.List[string]
+$issues = @()
 "=== Critical services ==="
 foreach ($name in @('Winmgmt','EventLog','BFE')) {
   try {
     $s = Get-Service -Name $name -ErrorAction Stop
     [pscustomobject]@{ Name=$s.Name; Status=$s.Status; StartType=$s.StartType } |
       Format-Table -AutoSize | Out-String -Width 4096
-    if ($s.Status -ne 'Running') { $issues.Add("$name service is $($s.Status)") }
+    if ($s.Status -ne 'Running') { $issues += "$name service is $($s.Status)" }
   } catch {
-    $issues.Add("$name service query failed: $($_.Exception.Message)")
+    $issues += "$name service query failed: $($_.Exception.Message)"
   }
 }
 "=== Required cmdlets ==="
@@ -373,7 +374,7 @@ foreach ($cmd in @('Get-NetAdapter','Get-NetIPAddress','Get-NetRoute','Get-NetTC
   $present = [bool](Get-Command $cmd -ErrorAction SilentlyContinue)
   [pscustomobject]@{ Command=$cmd; Present=$present } |
     Format-Table -AutoSize | Out-String -Width 4096
-  if (-not $present) { $issues.Add("$cmd is unavailable") }
+  if (-not $present) { $issues += "$cmd is unavailable" }
 }
 if ($issues.Count -gt 0) {
   "=== ISSUES ==="
