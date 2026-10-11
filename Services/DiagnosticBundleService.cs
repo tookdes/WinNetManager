@@ -659,13 +659,19 @@ Get-NetFirewallRule -Enabled True -ErrorAction SilentlyContinue |
   ConvertTo-Csv -NoTypeInformation
 """, 30000),
 
-            ("07-firewall/block-rules-detail.txt", "收集启用的阻止规则及端口/地址过滤器", """
+            ("07-firewall/block-rules-detail.txt", "收集启用的阻止规则及端口/地址/程序过滤器", """
 $rules = Get-NetFirewallRule -Enabled True -Action Block -ErrorAction SilentlyContinue
 foreach ($r in $rules) {
   "===== $($r.DisplayName) ====="
   $r | Select-Object Name,DisplayName,Direction,Action,Profile,InterfaceType,PolicyStoreSource | Format-List | Out-String -Width 4096
+  "----- Address Filter -----"
   $r | Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue | Format-List * | Out-String -Width 4096
+  "----- Port Filter -----"
   $r | Get-NetFirewallPortFilter -ErrorAction SilentlyContinue | Format-List * | Out-String -Width 4096
+  "----- Application Filter -----"
+  $r | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue |
+    Select-Object Program,Package |
+    Format-List * | Out-String -Width 4096
 }
 """, 30000),
 
@@ -829,6 +835,43 @@ foreach ($logName in $logs) {
     Format-List * | Out-String -Width 4096
 }
 """, 25000),
+
+            ("10-events/platform-network-events-48h.txt", "收集 NLA/WFP/防火墙/转发/DHCPv6 专用事件", """
+$start = (Get-Date).AddHours(-48)
+$logs = @(
+  'Microsoft-Windows-NlaSvc/Operational',
+  'Microsoft-Windows-WFP/Operational',
+  'Microsoft-Windows-Windows Firewall With Advanced Security/Firewall',
+  'Microsoft-Windows-Windows Firewall With Advanced Security/FirewallDiagnostics',
+  'Microsoft-Windows-Forwarding/Operational',
+  'Microsoft-Windows-Dhcpv6-Client/Admin',
+  'Microsoft-Windows-Dhcpv6-Client/Operational'
+)
+foreach ($logName in $logs) {
+  "===== $logName ====="
+  $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
+  if (-not $log) {
+    "Log not present."
+    continue
+  }
+
+  $log | Select-Object LogName,IsEnabled,RecordCount,LastWriteTime,MaximumSizeInBytes,FileSize |
+    Format-List * | Out-String -Width 4096
+
+  if (-not $log.IsEnabled) {
+    "Log is disabled."
+    continue
+  }
+
+  try {
+    Get-WinEvent -FilterHashtable @{LogName=$logName;StartTime=$start} -MaxEvents 800 -ErrorAction Stop |
+      Select-Object TimeCreated,Id,LevelDisplayName,ProviderName,Message |
+      Format-List * | Out-String -Width 4096
+  } catch {
+    "ERROR: $($_.Exception.Message)"
+  }
+}
+""", 30000),
 
             ("10-events/wlan-events-48h.txt", "收集最近 48 小时 Wi-Fi 连接事件", """
 $start = (Get-Date).AddHours(-48)
