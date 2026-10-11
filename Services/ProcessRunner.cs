@@ -160,6 +160,10 @@ public static class ProcessRunner
             error = CleanCliXml(errorBuilder.ToString());
             return outputBuilder.ToString();
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             error = ex.Message;
