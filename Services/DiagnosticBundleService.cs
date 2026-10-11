@@ -1613,6 +1613,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         }
     }
 
+    public static bool IsElevated => IsAdministrator();
+
     private static bool IsAdministrator()
     {
         try
@@ -1659,14 +1661,24 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 Error = message
             };
         }
+        cancellationToken.ThrowIfCancellationRequested();
         string etl = Path.Combine(dir, "pktmon.etl");
         string txt = Path.Combine(dir, "pktmon.txt");
         string pcapng = Path.Combine(dir, "pktmon.pcapng");
         var sw = Stopwatch.StartNew();
         var log = new StringBuilder();
 
+        // Record pre-existing state. We intentionally do not call "pktmon stop" here:
+        // another administrator may already be using an active capture.
+        string statusOutput = ProcessRunner.RunNative(
+            pktmonExe, "status", out string statusError, out int statusCode, 10000, cancellationToken);
+        log.AppendLine("=== pktmon status before start ===");
+        log.AppendLine(statusOutput);
+        log.AppendLine(statusError);
+        log.AppendLine($"status exit={statusCode}");
+
         string startArgs = $"start --capture --pkt-size 128 --file-name \"{etl}\" --file-size 32";
-        string startOutput = ProcessRunner.RunNative(pktmonExe, startArgs, out string startError, out int startCode, 15000);
+        string startOutput = ProcessRunner.RunNative(pktmonExe, startArgs, out string startError, out int startCode, 15000, cancellationToken);
         log.AppendLine("=== pktmon start ===");
         log.AppendLine(startOutput);
         log.AppendLine(startError);
@@ -1682,20 +1694,24 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 Status = "WARN",
                 ExitCode = startCode,
                 DurationMs = sw.ElapsedMilliseconds,
-                Error = startError
+                Error = string.IsNullOrWhiteSpace(startError)
+                    ? "PktMon 启动失败。请查看 pktmon-control.txt；可能已有抓包正在运行，或当前 Windows 版本不支持所需参数。"
+                    : startError
             };
         }
 
         try
         {
-            Thread.Sleep(TimeSpan.FromSeconds(seconds));
+            if (cancellationToken.WaitHandle.WaitOne(TimeSpan.FromSeconds(seconds)))
+                throw new OperationCanceledException(cancellationToken);
 
             string counters = ProcessRunner.RunNative(
                 pktmonExe,
                 "counters --type drop --include-hidden --drop-reason --json",
                 out string countersError,
                 out int countersCode,
-                15000);
+                15000,
+                cancellationToken);
             var countersText = new StringBuilder();
             countersText.AppendLine($"ExitCode: {countersCode}");
             if (!string.IsNullOrWhiteSpace(counters))
@@ -1710,7 +1726,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         }
         finally
         {
-            string stopOutput = ProcessRunner.RunNative(pktmonExe, "stop", out string stopError, out int stopCode, 15000);
+            // Always stop the capture even when the user cancelled the bundle.
+            string stopOutput = ProcessRunner.RunNative(pktmonExe, "stop", out string stopError, out int stopCode, 15000, CancellationToken.None);
             log.AppendLine("=== pktmon stop ===");
             log.AppendLine(stopOutput);
             log.AppendLine(stopError);
@@ -1720,14 +1737,14 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         if (File.Exists(etl))
         {
             string txtArgs = $"etl2txt \"{etl}\" --out \"{txt}\"";
-            string conv = ProcessRunner.RunNative(pktmonExe, txtArgs, out string convErr, out int convCode, 30000);
+            string conv = ProcessRunner.RunNative(pktmonExe, txtArgs, out string convErr, out int convCode, 30000, cancellationToken);
             log.AppendLine("=== pktmon etl2txt ===");
             log.AppendLine(conv);
             log.AppendLine(convErr);
             log.AppendLine($"exit={convCode}");
 
             string pcapArgs = $"etl2pcap \"{etl}\" --out \"{pcapng}\"";
-            string pcap = ProcessRunner.RunNative(pktmonExe, pcapArgs, out string pcapErr, out int pcapCode, 30000);
+            string pcap = ProcessRunner.RunNative(pktmonExe, pcapArgs, out string pcapErr, out int pcapCode, 30000, cancellationToken);
             log.AppendLine("=== pktmon etl2pcap ===");
             log.AppendLine(pcap);
             log.AppendLine(pcapErr);
