@@ -1420,7 +1420,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         return 0;
     }
 
-    private static void AnalyzeConnectivity(
+    internal static void AnalyzeConnectivity(
         List<string> findings,
         List<PingProbeResult> pings,
         List<HttpProbeResult> http,
