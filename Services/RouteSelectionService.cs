@@ -267,9 +267,8 @@ internal static class RouteSelectionService
         public ushort Family;
         public ushort Port;
         public InAddr Address;
-
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]
-        public byte[] Zero;
+        public uint Zero1;
+        public uint Zero2;
     }
 
     [StructLayout(LayoutKind.Sequential)]
