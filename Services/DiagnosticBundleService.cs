@@ -2608,26 +2608,35 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine();
 
         sb.AppendLine("## Ping 摘要");
-        sb.AppendLine("| 目标 | 类型 | DNS | 收/发 | 丢包 | 平均延迟 |");
-        sb.AppendLine("|---|---|---|---:|---:|---:|");
+        sb.AppendLine("| 目标 | 类型 | DNS | 路由源地址 | 出口网卡 | 下一跳 | 收/发 | 丢包 | 平均延迟 |");
+        sb.AppendLine("|---|---|---|---|---|---|---:|---:|---:|");
         foreach (var p in pingResults)
         {
             string loss = double.IsNaN(p.LossPercent) ? "-" : $"{p.LossPercent:F0}%";
             string sentReceived = p.Sent <= 0 ? "未发送" : $"{p.Received}/{p.Sent}";
-            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {Md(string.IsNullOrWhiteSpace(p.DnsStatus) ? "-" : p.DnsStatus)} | {sentReceived} | {loss} | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
+            string source = p.Route?.BestSourceAddress ?? "-";
+            string iface = p.Route?.InterfaceDisplay ?? "-";
+            string nextHop = string.IsNullOrWhiteSpace(p.Route?.NextHop) ? "on-link" : p.Route!.NextHop;
+            sb.AppendLine($"| {Md(p.Target)} | {Md(p.Kind)} | {Md(string.IsNullOrWhiteSpace(p.DnsStatus) ? "-" : p.DnsStatus)} | {Md(source)} | {Md(iface)} | {Md(nextHop)} | {sentReceived} | {loss} | {(p.Received > 0 ? $"{p.AvgMs:F1} ms" : "-")} |");
         }
         sb.AppendLine();
 
         sb.AppendLine("## HTTP / HTTPS 摘要");
-        sb.AppendLine("| 路径 | URL | 结果 | 耗时 |");
-        sb.AppendLine("|---|---|---|---:|");
+        sb.AppendLine("| 路径 | URL | 实际本地端点 | 实际远端端点 | 出口网卡 | 结果 | 耗时 |");
+        sb.AppendLine("|---|---|---|---|---|---|---:|");
         foreach (var h in httpResults)
         {
             string result = h.ResponseReceived
                 ? (h.Success ? $"HTTP {h.StatusCode}（正常）" : $"HTTP {h.StatusCode}（有响应但语义异常：{Md(h.Detail)}）")
                 : Md(h.Detail);
-            sb.AppendLine($"| {Md(h.Mode)} | {Md(h.Url)} | {result} | {h.DurationMs} ms |");
+            sb.AppendLine($"| {Md(h.Mode)} | {Md(h.Url)} | {Md(string.IsNullOrWhiteSpace(h.TransportLocalEndpoint) ? "-" : h.TransportLocalEndpoint)} | {Md(string.IsNullOrWhiteSpace(h.TransportRemoteEndpoint) ? "-" : h.TransportRemoteEndpoint)} | {Md(h.Route?.InterfaceDisplay ?? "-")} | {result} | {h.DurationMs} ms |");
         }
+        sb.AppendLine();
+
+        sb.AppendLine("## 路由选择 / 源接口证据");
+        sb.AppendLine("- Ping 的源地址、接口、下一跳来自探测时刻的 Windows IP Helper 路由选择（GetBestInterfaceEx + GetBestRoute2）；它表示操作系统当时将选择的路径，不等同于抓包确认的 ICMP 源地址。");
+        sb.AppendLine("- HTTP/HTTPS 额外记录了实际建立 TCP 连接后的 LocalEndPoint / RemoteEndPoint；路由归因针对这个实际远端。系统代理路径中的实际远端可能是代理服务器，而不是 URL 原站。");
+        sb.AppendLine("- 完整的目标前缀、Route Metric、Interface Metric、Effective Metric 与接口描述见 05-connectivity/route-attribution.tsv；用户指定目标的 TCP 实际端点也写入 custom-target.txt。");
         sb.AppendLine();
 
         sb.AppendLine("## 5 秒接口流量采样");
@@ -2709,8 +2718,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine("- 全部网卡、驱动、绑定、高级属性、IPv4/IPv6、DHCP、网关、MTU、跃点");
         sb.AppendLine("- 活动与持久路由、ARP/IPv6 Neighbor");
         sb.AppendLine("- DNS、NRPT、Hosts、系统解析与逐 DNS 服务器解析测试");
-        sb.AppendLine("- 网关/公共 IPv4/IPv6/常用域名 Ping 与丢包");
-        sb.AppendLine("- HTTP/HTTPS 直连与系统代理路径");
+        sb.AppendLine("- 网关/公共 IPv4/IPv6/常用域名 Ping 与丢包，并记录 Windows 路由选择的源地址/出口网卡/下一跳/Metric");
+        sb.AppendLine("- HTTP/HTTPS 直连与系统代理路径，并记录实际 TCP LocalEndPoint/RemoteEndPoint 和对应出口路由");
         sb.AppendLine("- IPv4/IPv6 条件化并发 Traceroute；如界面填写了目标/端口，还会额外测试该故障目标的 DNS/Ping/TCP/HTTP/Traceroute");
         sb.AppendLine("- TCP 动态/排除端口范围、连接表、监听端点");
         sb.AppendLine("- WinINET/PAC、VPN、网络接管软件、Winsock、完整 WFP state/filters、驱动线索");
