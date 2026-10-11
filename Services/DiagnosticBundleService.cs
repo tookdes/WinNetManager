@@ -2393,6 +2393,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         sb.AppendLine();
 
         sb.AppendLine("## 采集步骤");
+        sb.AppendLine("状态说明：OK=成功且有内容；EMPTY=成功但无数据；SKIP=条件不适用而跳过；WARN=有部分结果但存在采集警告；FAIL=采集失败。");
+        sb.AppendLine();
         sb.AppendLine("| 状态 | 项目 | 文件 | 耗时 |");
         sb.AppendLine("|---|---|---|---:|");
         foreach (var r in records)
