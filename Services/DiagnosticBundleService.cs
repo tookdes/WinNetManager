@@ -246,7 +246,7 @@ public static class DiagnosticBundleService
                 progress?.Report($"附加 PktMon 抓包（{options.PacketCaptureSeconds} 秒）...");
                 var captureRecord = CapturePktMon(workDir, Math.Clamp(options.PacketCaptureSeconds, 5, 30));
                 records.Add(captureRecord);
-                if (captureRecord.Status != "OK") errorCount++;
+                if (captureRecord.Status == "WARN") errorCount++;
             }
 
             progress?.Report("生成 SUMMARY.md 与 manifest.json...");
@@ -760,22 +760,23 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
     private static List<DiagnosticStepRecord> CollectWfpSnapshot(string root)
     {
-        var records = new List<DiagnosticStepRecord>();
-        string dir = EnsureDirectory(root, "07-firewall");
+        EnsureDirectory(root, "07-firewall");
 
         if (!IsAdministrator())
         {
             const string message = "当前进程不是管理员权限，跳过 WFP state/filters 导出。";
             WriteText(root, "07-firewall/wfp-skipped.txt", message);
-            records.Add(new DiagnosticStepRecord
+            return new List<DiagnosticStepRecord>
             {
-                Name = "导出 WFP 状态",
-                File = "07-firewall/wfp-skipped.txt",
-                Status = "SKIP",
-                ExitCode = 0,
-                Error = message
-            });
-            return records;
+                new()
+                {
+                    Name = "导出 WFP 状态",
+                    File = "07-firewall/wfp-skipped.txt",
+                    Status = "SKIP",
+                    ExitCode = 0,
+                    Error = message
+                }
+            };
         }
 
         var jobs = new[]
@@ -785,7 +786,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             (Name: "WFP system ports", Relative: "07-firewall/wfp-sysports.xml", ArgsPrefix: "wfp show sysports")
         };
 
-        foreach (var job in jobs)
+        DiagnosticStepRecord RunOne((string Name, string Relative, string ArgsPrefix) job)
         {
             string path = Path.Combine(root, job.Relative.Replace('/', Path.DirectorySeparatorChar));
             var sw = Stopwatch.StartNew();
@@ -799,7 +800,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                              $"Output file: {path}\r\nExists: {hasFile}\r\n\r\n{output}\r\n{error}";
             WriteText(root, job.Relative + ".log.txt", control);
 
-            records.Add(new DiagnosticStepRecord
+            return new DiagnosticStepRecord
             {
                 Name = $"导出 {job.Name}",
                 File = job.Relative,
@@ -807,10 +808,12 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 ExitCode = exitCode,
                 DurationMs = sw.ElapsedMilliseconds,
                 Error = status == "OK" ? "" : (string.IsNullOrWhiteSpace(error) ? "WFP 输出文件未生成或为空" : error)
-            });
+            };
         }
 
-        return records;
+        // 只读查询彼此独立；并发执行把最坏等待从 3×45 秒压到约 45 秒。
+        var tasks = jobs.Select(job => Task.Run(() => RunOne(job))).ToArray();
+        return Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
     }
 
     private static List<DiagnosticStepRecord> RunConditionalTraceroutes(
@@ -1576,6 +1579,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             generated_at = started,
             computer_name = Environment.MachineName,
             app_version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
+            elevated = IsAdministrator(),
             packet_capture = options.IncludePacketCapture,
             packet_capture_seconds = options.PacketCaptureSeconds,
             steps = records
