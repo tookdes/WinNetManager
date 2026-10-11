@@ -25,6 +25,9 @@ public sealed class DiagnosticBundleOptions
     // Optional user-reported failing destination. Reuses the Network Diagnostics target/port fields.
     public string CustomTarget { get; set; } = "";
     public int? CustomPort { get; set; }
+
+    // Hard upper bound for pathological/broken systems. Partial evidence is retained on timeout.
+    public int TotalBudgetSeconds { get; set; } = 180;
 }
 
 public sealed class DiagnosticBundleResult
@@ -114,9 +117,14 @@ public static class DiagnosticBundleService
         string zipPath,
         DiagnosticBundleOptions? options = null,
         IProgress<string>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken userCancellationToken = default)
     {
         options ??= new DiagnosticBundleOptions();
+        int budgetSeconds = Math.Clamp(options.TotalBudgetSeconds, 60, 600);
+        using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(userCancellationToken);
+        budgetCts.CancelAfter(TimeSpan.FromSeconds(budgetSeconds));
+        CancellationToken cancellationToken = budgetCts.Token;
+
         var started = DateTimeOffset.Now;
         string workDir = Path.Combine(
             Path.GetTempPath(),
@@ -325,6 +333,21 @@ public static class DiagnosticBundleService
                 FileCount = fileCount,
                 WarningCount = warningCount,
                 ErrorCount = errorCount
+            };
+        }
+        catch (OperationCanceledException) when (
+            !userCancellationToken.IsCancellationRequested &&
+            cancellationToken.IsCancellationRequested)
+        {
+            return new DiagnosticBundleResult
+            {
+                Success = false,
+                Cancelled = false,
+                WorkingDirectory = workDir,
+                Duration = DateTimeOffset.Now - started,
+                WarningCount = warningCount,
+                ErrorCount = errorCount + 1,
+                ErrorMessage = $"深度诊断超过总时间预算 {budgetSeconds} 秒，已停止后续采集。已完成的临时文件已保留。"
             };
         }
         catch (OperationCanceledException)
