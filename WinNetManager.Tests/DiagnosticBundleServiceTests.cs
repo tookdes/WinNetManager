@@ -51,6 +51,32 @@ public class DiagnosticBundleServiceTests
     }
 
     [Fact]
+    public void RouteSelection_LoopbackIpv4_ReturnsSourceInterfaceAndMetrics()
+    {
+        var route = RouteSelectionService.Lookup(System.Net.IPAddress.Loopback);
+
+        Assert.True(route.Success, route.Error);
+        Assert.True(route.InterfaceIndex > 0);
+        Assert.False(string.IsNullOrWhiteSpace(route.BestSourceAddress));
+        Assert.False(string.IsNullOrWhiteSpace(route.DestinationPrefix));
+        Assert.Equal("IPv4", route.AddressFamily);
+
+        if (route.InterfaceMetric.HasValue)
+            Assert.Equal(route.RouteMetric + route.InterfaceMetric.Value, route.EffectiveMetric);
+    }
+
+    [Fact]
+    public void RouteSelection_LoopbackIpv6_ReturnsSourceInterface()
+    {
+        var route = RouteSelectionService.Lookup(System.Net.IPAddress.IPv6Loopback);
+
+        Assert.True(route.Success, route.Error);
+        Assert.True(route.InterfaceIndex > 0);
+        Assert.False(string.IsNullOrWhiteSpace(route.BestSourceAddress));
+        Assert.Equal("IPv6", route.AddressFamily);
+    }
+
+    [Fact]
     public void AnalyzeConnectivity_DoesNotClaimGatewayReachable_WhenNoGatewayExists()
     {
         var findings = new List<string>();
