@@ -1659,9 +1659,17 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var results = Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine("Mode\tURL\tResponseReceived\tSuccess\tStatusCode\tDurationMs\tDetail");
+        sb.AppendLine("Mode\tURL\tResponseReceived\tSuccess\tStatusCode\tDurationMs\tTransportLocal\tTransportRemote\tRouteSource\tRouteInterfaceIndex\tRouteInterface\tNextHop\tRoutePrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tDetail");
         foreach (var r in results)
-            sb.AppendLine($"{r.Mode}\t{EscapeTsv(r.Url)}\t{r.ResponseReceived}\t{r.Success}\t{r.StatusCode}\t{r.DurationMs}\t{EscapeTsv(r.Detail)}");
+        {
+            var route = r.Route;
+            sb.AppendLine(
+                $"{r.Mode}\t{EscapeTsv(r.Url)}\t{r.ResponseReceived}\t{r.Success}\t{r.StatusCode}\t{r.DurationMs}\t" +
+                $"{EscapeTsv(r.TransportLocalEndpoint)}\t{EscapeTsv(r.TransportRemoteEndpoint)}\t{EscapeTsv(route?.BestSourceAddress ?? "")}\t" +
+                $"{(route?.InterfaceIndex.ToString() ?? "")}\t{EscapeTsv(route?.InterfaceName ?? "")}\t{EscapeTsv(route?.NextHop ?? "")}\t" +
+                $"{EscapeTsv(route?.DestinationPrefix ?? "")}\t{(route?.Success == true ? route.RouteMetric.ToString() : "")}\t" +
+                $"{(route?.InterfaceMetric?.ToString() ?? "")}\t{(route?.EffectiveMetric?.ToString() ?? "")}\t{EscapeTsv(r.Detail)}");
+        }
         WriteText(root, "05-connectivity/http-tests.tsv", sb.ToString());
         return results;
     }
@@ -1677,12 +1685,53 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
         try
         {
-            using var handler = new HttpClientHandler
+            using var handler = new SocketsHttpHandler
             {
                 UseProxy = useProxy,
                 // Keep redirects visible: captive portals often reveal themselves as 30x here.
                 AllowAutoRedirect = false
             };
+
+            // Record the actual TCP transport selected by HttpClient. For direct requests this
+            // is the origin endpoint; with a system proxy it is normally the proxy transport.
+            // This avoids claiming that the route to the origin is the route actually used by
+            // a proxied request.
+            handler.ConnectCallback = async (context, token) =>
+            {
+                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+                try
+                {
+                    await socket.ConnectAsync(context.DnsEndPoint, token).ConfigureAwait(false);
+
+                    if (socket.LocalEndPoint is IPEndPoint local)
+                        r.TransportLocalEndpoint = local.ToString();
+
+                    if (socket.RemoteEndPoint is IPEndPoint remote)
+                    {
+                        r.TransportRemoteEndpoint = remote.ToString();
+                        try { r.Route = RouteSelectionService.Lookup(remote.Address); }
+                        catch (Exception ex)
+                        {
+                            r.Route = new RouteSelectionInfo
+                            {
+                                Success = false,
+                                LookupStage = "managed wrapper",
+                                Error = ex.Message,
+                                Destination = remote.Address.ToString(),
+                                AddressFamily = remote.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6"
+                            };
+                        }
+                    }
+
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+            };
+
             using var client = new HttpClient(handler);
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(7));
