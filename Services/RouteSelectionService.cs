@@ -8,6 +8,18 @@ using System.Runtime.InteropServices;
 
 namespace WinNetManager.Services;
 
+internal sealed class LocalInterfaceInfo
+{
+    public uint InterfaceIndex { get; init; }
+    public string InterfaceName { get; init; } = "";
+    public string InterfaceDescription { get; init; } = "";
+
+    public string Display =>
+        string.IsNullOrWhiteSpace(InterfaceName)
+            ? (InterfaceIndex == 0 ? "" : $"ifIndex {InterfaceIndex}")
+            : $"{InterfaceName} (ifIndex {InterfaceIndex})";
+}
+
 internal sealed class RouteSelectionInfo
 {
     public bool Success { get; init; }
@@ -51,11 +63,44 @@ internal static class RouteSelectionService
     private const ushort AF_INET6 = 23;
     private const int ScopeLevelCount = 16;
 
+    public static LocalInterfaceInfo? FindInterfaceForLocalAddress(IPAddress address)
+    {
+        IPAddress normalized = NormalizeAddress(address);
+
+        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            try
+            {
+                var props = ni.GetIPProperties();
+                bool ownsAddress = props.UnicastAddresses.Any(u =>
+                    NormalizeAddress(u.Address).Equals(normalized));
+
+                if (!ownsAddress)
+                    continue;
+
+                int index = normalized.AddressFamily == AddressFamily.InterNetwork
+                    ? props.GetIPv4Properties()?.Index ?? -1
+                    : props.GetIPv6Properties()?.Index ?? -1;
+
+                return new LocalInterfaceInfo
+                {
+                    InterfaceIndex = index < 0 ? 0u : (uint)index,
+                    InterfaceName = ni.Name,
+                    InterfaceDescription = ni.Description
+                };
+            }
+            catch { }
+        }
+
+        return null;
+    }
+
     public static RouteSelectionInfo Lookup(IPAddress destination)
     {
         if (destination == null)
             throw new ArgumentNullException(nameof(destination));
 
+        destination = NormalizeAddress(destination);
         var nativeDestination = SockaddrInet.FromIPAddress(destination);
 
         uint error = GetBestInterfaceEx(ref nativeDestination, out uint ifIndex);
@@ -123,6 +168,9 @@ internal static class RouteSelectionService
             InterfaceIndex = interfaceIndex
         };
     }
+
+    internal static IPAddress NormalizeAddress(IPAddress address) =>
+        address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
 
     private static NetworkInterface? FindNetworkInterface(uint interfaceIndex, AddressFamily family)
     {
