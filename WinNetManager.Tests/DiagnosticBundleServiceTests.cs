@@ -77,6 +77,48 @@ public class DiagnosticBundleServiceTests
     }
 
     [Fact]
+    public async Task HttpProbe_Direct_RecordsActualSocketEndpointsAndInterface()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+
+        var serverTask = Task.Run(async () =>
+        {
+            using var accepted = await listener.AcceptTcpClientAsync();
+            using var stream = accepted.GetStream();
+            var buffer = new byte[4096];
+            _ = await stream.ReadAsync(buffer);
+            byte[] response = System.Text.Encoding.ASCII.GetBytes(
+                "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(response);
+            await stream.FlushAsync();
+        });
+
+        try
+        {
+            var result = DiagnosticBundleService.HttpProbe(
+                $"http://127.0.0.1:{port}/",
+                useProxy: false,
+                CancellationToken.None);
+
+            Assert.True(result.ResponseReceived, result.Detail);
+            Assert.True(result.Success, result.Detail);
+            Assert.False(string.IsNullOrWhiteSpace(result.TransportLocalEndpoint));
+            Assert.False(string.IsNullOrWhiteSpace(result.TransportRemoteEndpoint));
+            Assert.False(string.IsNullOrWhiteSpace(result.ActualLocalInterface));
+            Assert.NotNull(result.Route);
+            Assert.True(result.Route!.Success, result.Route.Error);
+
+            await serverTask;
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
     public void AnalyzeConnectivity_DoesNotClaimGatewayReachable_WhenNoGatewayExists()
     {
         var findings = new List<string>();
