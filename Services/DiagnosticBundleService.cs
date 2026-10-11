@@ -67,6 +67,7 @@ internal sealed class PingProbeResult
     public string ResolvedAddress { get; set; } = "";
     public string DnsStatus { get; set; } = "";
     public string Error { get; set; } = "";
+    public RouteSelectionInfo? Route { get; set; }
     public double LossPercent => Sent <= 0 ? double.NaN : (Sent - Received) * 100.0 / Sent;
 }
 
@@ -79,6 +80,9 @@ internal sealed class HttpProbeResult
     public int StatusCode { get; set; }
     public long DurationMs { get; set; }
     public string Detail { get; set; } = "";
+    public string TransportLocalEndpoint { get; set; } = "";
+    public string TransportRemoteEndpoint { get; set; } = "";
+    public RouteSelectionInfo? Route { get; set; }
 }
 
 internal sealed class TrafficSnapshot
