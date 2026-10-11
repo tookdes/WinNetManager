@@ -273,7 +273,7 @@ public static class DiagnosticBundleService
             if (options.IncludePacketCapture)
             {
                 progress?.Report($"附加 PktMon 抓包（{options.PacketCaptureSeconds} 秒）...");
-                var captureRecord = CapturePktMon(workDir, Math.Clamp(options.PacketCaptureSeconds, 5, 30), cancellationToken);
+                var captureRecord = CapturePktMon(workDir, Math.Clamp(options.PacketCaptureSeconds, 5, 60), cancellationToken);
                 records.Add(captureRecord);
                 if (IsStepError(captureRecord.Status)) errorCount++;
             }
@@ -2078,6 +2078,18 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
         // Record pre-existing state. We intentionally do not call "pktmon stop" here:
         // another administrator may already be using an active capture.
+        string filterOutput = ProcessRunner.RunNative(
+            pktmonExe, "filter list", out string filterError, out int filterCode, 10000, cancellationToken);
+        WriteCommandResult(
+            root,
+            "11-packet-capture/pktmon-filters-before.txt",
+            "PktMon 活动过滤器（抓包前）",
+            "pktmon filter list",
+            filterOutput,
+            filterError,
+            filterCode,
+            TimeSpan.Zero);
+
         string statusOutput = ProcessRunner.RunNative(
             pktmonExe, "status", out string statusError, out int statusCode, 10000, cancellationToken);
         log.AppendLine("=== pktmon status before start ===");
@@ -2108,6 +2120,17 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
             };
         }
 
+        // We own this newly-started capture, so reset its counters to create a clean
+        // baseline. The final counters then represent this capture window rather than
+        // a cumulative value inherited from earlier monitoring.
+        string resetOutput = ProcessRunner.RunNative(
+            pktmonExe, "reset", out string resetError, out int resetCode, 10000, cancellationToken);
+        bool countersReset = resetCode == 0;
+        log.AppendLine("=== pktmon reset ===");
+        log.AppendLine(resetOutput);
+        log.AppendLine(resetError);
+        log.AppendLine($"reset exit={resetCode}");
+
         try
         {
             if (cancellationToken.WaitHandle.WaitOne(TimeSpan.FromSeconds(seconds)))
@@ -2115,12 +2138,16 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
 
             string counters = ProcessRunner.RunNative(
                 pktmonExe,
-                "counters --type drop --include-hidden --drop-reason --json",
+                "counters --type drop --json",
                 out string countersError,
                 out int countersCode,
                 15000,
                 cancellationToken);
             var countersText = new StringBuilder();
+            countersText.AppendLine($"CountersResetAtCaptureStart: {countersReset}");
+            countersText.AppendLine(countersReset
+                ? "Interpretation: counters represent drops accumulated during this capture window."
+                : "Interpretation: pktmon reset failed; counters may include values accumulated before this capture.");
             countersText.AppendLine($"ExitCode: {countersCode}");
             if (!string.IsNullOrWhiteSpace(counters))
                 countersText.AppendLine(counters.TrimEnd());
@@ -2130,7 +2157,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                 countersText.AppendLine("=== STDERR / ERROR ===");
                 countersText.AppendLine(countersError.TrimEnd());
             }
-            WriteText(root, "11-packet-capture/pktmon-drop-counters.json.txt", countersText.ToString());
+            WriteText(root, "11-packet-capture/pktmon-drop-counters-window.json.txt", countersText.ToString());
         }
         finally
         {
