@@ -1320,7 +1320,7 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
     private static bool IsStepError(string status)
         => status is "WARN" or "FAIL";
 
-    private static string ClassifyStep(
+    internal static string ClassifyStep(
         int exitCode,
         string error,
         string output,
