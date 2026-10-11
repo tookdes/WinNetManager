@@ -240,14 +240,13 @@ public static class DiagnosticBundleService
             progress?.Report("检查近期 IP 冲突与网络事件...");
             try
             {
-                int conflicts = GetRecentIpConflictCount(cancellationToken);
+                int conflicts = ReadRecentIpConflictCount(workDir);
                 if (conflicts > 0)
                 {
                     findings.Add($"[危险] 最近 48 小时检测到 {conflicts} 条 TCP/IP 地址冲突事件（Event ID 4199）。");
                     warningCount++;
                 }
             }
-            catch (OperationCanceledException) { throw; }
             catch { }
 
             AnalyzeConnectivity(findings, pingResults, httpResults, ref warningCount);
@@ -739,7 +738,8 @@ Get-NetUDPEndpoint -ErrorAction SilentlyContinue |
             ("10-events/network-events-48h.txt", "收集最近 48 小时网络相关系统事件", """
 $start = (Get-Date).AddHours(-48)
 $criticalIds = @(1014,4199,4201,1001,1002,50036,50058,50067,10400,10401,10402,10403)
-$critical = Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start;Id=$criticalIds} -ErrorAction SilentlyContinue
+$critical = @(Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start;Id=$criticalIds} -ErrorAction SilentlyContinue)
+"IP_CONFLICT_COUNT=$(@($critical | Where-Object Id -eq 4199).Count)"
 
 # Supplement with recent network-provider events. Critical IDs above are already safe from MaxEvents truncation.
 $recent = Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start} -MaxEvents 5000 -ErrorAction SilentlyContinue |
@@ -1403,13 +1403,21 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         return task.GetAwaiter().GetResult();
     }
 
-    private static int GetRecentIpConflictCount(CancellationToken cancellationToken)
+    private static int ReadRecentIpConflictCount(string root)
     {
-        string output = ProcessRunner.RunPowerShell(
-            "$s=(Get-Date).AddHours(-48); " +
-            "(Get-WinEvent -FilterHashtable @{LogName='System';Id=4199;StartTime=$s} -ErrorAction SilentlyContinue | Measure-Object).Count",
-            out _, 10000, cancellationToken);
-        return int.TryParse(output.Trim(), out int count) ? count : 0;
+        string path = Path.Combine(root, "10-events", "network-events-48h.txt");
+        if (!File.Exists(path))
+            return 0;
+
+        const string prefix = "IP_CONFLICT_COUNT=";
+        foreach (string line in File.ReadLines(path))
+        {
+            string value = line.Trim();
+            if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(value[prefix.Length..].Trim(), out int count))
+                return count;
+        }
+        return 0;
     }
 
     private static void AnalyzeConnectivity(
