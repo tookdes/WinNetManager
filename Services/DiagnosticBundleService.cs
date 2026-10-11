@@ -82,6 +82,8 @@ internal sealed class HttpProbeResult
     public string Detail { get; set; } = "";
     public string TransportLocalEndpoint { get; set; } = "";
     public string TransportRemoteEndpoint { get; set; } = "";
+    public string ActualLocalInterface { get; set; } = "";
+    public uint? ActualLocalInterfaceIndex { get; set; }
     public RouteSelectionInfo? Route { get; set; }
 }
 
@@ -1664,13 +1666,13 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
         var results = Task.WhenAll(tasks).GetAwaiter().GetResult().ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine("Mode\tURL\tResponseReceived\tSuccess\tStatusCode\tDurationMs\tTransportLocal\tTransportRemote\tRouteSource\tRouteInterfaceIndex\tRouteInterface\tNextHop\tRoutePrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tDetail");
+        sb.AppendLine("Mode\tURL\tResponseReceived\tSuccess\tStatusCode\tDurationMs\tTransportLocal\tActualLocalInterfaceIndex\tActualLocalInterface\tTransportRemote\tRouteSource\tRouteInterfaceIndex\tRouteInterface\tNextHop\tRoutePrefix\tRouteMetric\tInterfaceMetric\tEffectiveMetric\tDetail");
         foreach (var r in results)
         {
             var route = r.Route;
             sb.AppendLine(
                 $"{r.Mode}\t{EscapeTsv(r.Url)}\t{r.ResponseReceived}\t{r.Success}\t{r.StatusCode}\t{r.DurationMs}\t" +
-                $"{EscapeTsv(r.TransportLocalEndpoint)}\t{EscapeTsv(r.TransportRemoteEndpoint)}\t{EscapeTsv(route?.BestSourceAddress ?? "")}\t" +
+                $"{EscapeTsv(r.TransportLocalEndpoint)}\t{(r.ActualLocalInterfaceIndex?.ToString() ?? "")}\t{EscapeTsv(r.ActualLocalInterface)}\t{EscapeTsv(r.TransportRemoteEndpoint)}\t{EscapeTsv(route?.BestSourceAddress ?? "")}\t" +
                 $"{(route?.InterfaceIndex.ToString() ?? "")}\t{EscapeTsv(route?.InterfaceName ?? "")}\t{EscapeTsv(route?.NextHop ?? "")}\t" +
                 $"{EscapeTsv(route?.DestinationPrefix ?? "")}\t{(route?.Success == true ? route.RouteMetric.ToString() : "")}\t" +
                 $"{(route?.InterfaceMetric?.ToString() ?? "")}\t{(route?.EffectiveMetric?.ToString() ?? "")}\t{EscapeTsv(r.Detail)}");
@@ -1709,12 +1711,23 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                     await socket.ConnectAsync(context.DnsEndPoint, token).ConfigureAwait(false);
 
                     if (socket.LocalEndPoint is IPEndPoint local)
-                        r.TransportLocalEndpoint = local.ToString();
+                    {
+                        IPAddress localAddress = RouteSelectionService.NormalizeAddress(local.Address);
+                        r.TransportLocalEndpoint = new IPEndPoint(localAddress, local.Port).ToString();
+
+                        var localInterface = RouteSelectionService.FindInterfaceForLocalAddress(localAddress);
+                        if (localInterface != null)
+                        {
+                            r.ActualLocalInterface = localInterface.Display;
+                            r.ActualLocalInterfaceIndex = localInterface.InterfaceIndex;
+                        }
+                    }
 
                     if (socket.RemoteEndPoint is IPEndPoint remote)
                     {
-                        r.TransportRemoteEndpoint = remote.ToString();
-                        try { r.Route = RouteSelectionService.Lookup(remote.Address); }
+                        IPAddress remoteAddress = RouteSelectionService.NormalizeAddress(remote.Address);
+                        r.TransportRemoteEndpoint = new IPEndPoint(remoteAddress, remote.Port).ToString();
+                        try { r.Route = RouteSelectionService.Lookup(remoteAddress); }
                         catch (Exception ex)
                         {
                             r.Route = new RouteSelectionInfo
@@ -1722,8 +1735,8 @@ Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-NetworkProfile/Operat
                                 Success = false,
                                 LookupStage = "managed wrapper",
                                 Error = ex.Message,
-                                Destination = remote.Address.ToString(),
-                                AddressFamily = remote.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6"
+                                Destination = remoteAddress.ToString(),
+                                AddressFamily = remoteAddress.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6"
                             };
                         }
                     }
