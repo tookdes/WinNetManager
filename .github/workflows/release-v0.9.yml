@@ -1,0 +1,52 @@
+name: release-v0.9
+
+on:
+  push:
+    branches:
+      - release/v0.9
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Test
+        run: dotnet test WinNetManager.Tests/WinNetManager.Tests.csproj -c Release
+
+      - name: Publish framework-dependent package
+        shell: pwsh
+        run: |
+          dotnet publish WinNetManager.csproj -c Release -o publish -p:Version=0.9.0 -p:DebugSymbols=false -p:DebugType=None
+          if (Test-Path WinNetManager_v0.9.zip) { Remove-Item WinNetManager_v0.9.zip -Force }
+          Compress-Archive -Path .\publish\* -DestinationPath .\WinNetManager_v0.9.zip -CompressionLevel Optimal
+          Get-FileHash .\WinNetManager_v0.9.zip -Algorithm SHA256 | Format-List
+
+      - name: Create or update v0.9 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = "v0.9"
+          $asset = ".\WinNetManager_v0.9.zip"
+          $target = "32dee798b2338b06f5a639f84076a67253eae899"
+
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --repo $repo --title "v0.9" --notes-file "release-v0.9.md"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            gh release upload $tag $asset --repo $repo --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          else {
+            gh release create $tag $asset --repo $repo --target $target --title "v0.9" --notes-file "release-v0.9.md"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
