@@ -682,7 +682,7 @@ public class RoutingManager
             using (var writer = new StreamWriter(tempXml, false, Encoding.Unicode))
                 taskXml.Save(writer);
 
-            string args = $"/Create /TN \"{route.DynamicTriggerTaskName}\" /XML \"{tempXml}\" /F";
+            string args = $"/Create /TN \"{route.DynamicTriggerTaskName}\" /XML \"{tempXml}\" /RU SYSTEM /F";
             string output = ProcessRunner.RunNative(
                 "schtasks.exe",
                 args,
@@ -763,7 +763,6 @@ public class RoutingManager
                     new XElement(ns + "Principal",
                         new XAttribute("id", "Author"),
                         new XElement(ns + "UserId", "S-1-5-18"),
-                        new XElement(ns + "LogonType", "ServiceAccount"),
                         new XElement(ns + "RunLevel", "HighestAvailable"))),
                 new XElement(ns + "Settings",
                     new XElement(ns + "MultipleInstancesPolicy", "IgnoreNew"),
