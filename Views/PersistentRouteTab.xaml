@@ -98,7 +98,7 @@
                             <TextBlock Text="目标前缀" ToolTip="目标网络的 CIDR 表示，如 192.168.1.0/24 或 default"/>
                         </DataGridTextColumn.Header>
                     </DataGridTextColumn>
-                    <DataGridTemplateColumn Width="Auto">
+                    <DataGridTemplateColumn Width="Auto" SortMemberPath="NextHopDisplay">
                         <DataGridTemplateColumn.Header>
                             <TextBlock Text="下一跳" ToolTip="固定路由显示具体下一跳；动态路由显示 [DHCP] 自动及当前网关"/>
                         </DataGridTemplateColumn.Header>
