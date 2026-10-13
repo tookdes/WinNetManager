@@ -1,3 +1,4 @@
+using System.Security.Principal;
 using System.Text;
 using WinNetManager.Models;
 using WinNetManager.Services;
@@ -86,6 +87,55 @@ public class DynamicRouteTests
         Assert.Contains("PolicyStore PersistentStore", script, StringComparison.Ordinal);
         Assert.Contains("NO_GATEWAY", script, StringComparison.Ordinal);
         Assert.Contains("SYNCED|", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DynamicTaskXml_CanBeRegisteredAndDeleted_OnElevatedWindowsRunner()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
+            return; // Local non-elevated test runs still validate the pure XML tests above.
+
+        string unique = Guid.NewGuid().ToString("N")[..10];
+        var route = DynamicRoute($"__WNM_CI_NO_SUCH_IF_{unique}__", "198.18.0.0/15");
+        var doc = RoutingManager.BuildDynamicTaskXml(route);
+        string temp = Path.Combine(Path.GetTempPath(), $"wnm-task-{unique}.xml");
+
+        try
+        {
+            using (var writer = new StreamWriter(temp, false, Encoding.Unicode))
+                doc.Save(writer);
+
+            string createOutput = ProcessRunner.RunNative(
+                "schtasks.exe",
+                $"/Create /TN \"{route.DynamicTriggerTaskName}\" /XML \"{temp}\" /F",
+                out string createError,
+                out int createCode,
+                20000);
+
+            Assert.True(
+                createCode == 0,
+                $"schtasks /Create failed ({createCode})\nSTDOUT:\n{createOutput}\nSTDERR:\n{createError}");
+
+            _ = ProcessRunner.RunNative(
+                "schtasks.exe",
+                $"/Query /TN \"{route.DynamicTriggerTaskName}\"",
+                out string queryError,
+                out int queryCode,
+                10000);
+
+            Assert.True(queryCode == 0, queryError);
+        }
+        finally
+        {
+            _ = ProcessRunner.RunNative(
+                "schtasks.exe",
+                $"/Delete /TN \"{route.DynamicTriggerTaskName}\" /F",
+                out _,
+                out _,
+                10000);
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+        }
     }
 
     [Fact]
