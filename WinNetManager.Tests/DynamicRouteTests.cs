@@ -66,7 +66,7 @@ public class DynamicRouteTests
         string xml = doc.ToString();
 
         Assert.Contains("S-1-5-18", xml, StringComparison.Ordinal);
-        Assert.Contains("ServiceAccount", xml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<LogonType>ServiceAccount</LogonType>", xml, StringComparison.Ordinal);
         Assert.Contains("HighestAvailable", xml, StringComparison.Ordinal);
         Assert.Contains("Microsoft-Windows-Dhcp-Client/Operational", xml, StringComparison.Ordinal);
         Assert.Contains("EventID=50036 or EventID=50047", xml, StringComparison.Ordinal);
@@ -108,7 +108,7 @@ public class DynamicRouteTests
 
             string createOutput = ProcessRunner.RunNative(
                 "schtasks.exe",
-                $"/Create /TN \"{route.DynamicTriggerTaskName}\" /XML \"{temp}\" /F",
+                $"/Create /TN \"{route.DynamicTriggerTaskName}\" /XML \"{temp}\" /RU SYSTEM /F",
                 out string createError,
                 out int createCode,
                 20000);
