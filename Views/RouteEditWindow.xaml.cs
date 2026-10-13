@@ -55,13 +55,14 @@ public partial class RouteEditWindow : Window
         if (!string.IsNullOrEmpty(Route.InterfaceAlias))
         {
             var existing = CmbInterface.Items.Cast<ComboBoxItem>()
-                .FirstOrDefault(i => i.Content?.ToString() == Route.InterfaceAlias);
+                .FirstOrDefault(i => i.Tag?.ToString() == Route.InterfaceAlias);
             if (existing != null)
                 CmbInterface.SelectedItem = existing;
             else
                 CmbInterface.Text = Route.InterfaceAlias;
-            UpdateDynamicGatewayUi();
-    }
+        }
+
+        UpdateDynamicGatewayUi();
     }
 
     private void CmbAddressFamily_SelectionChanged(object sender, SelectionChangedEventArgs e)
