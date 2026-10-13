@@ -542,10 +542,345 @@ public class RoutingManager
         return interfaces;
     }
 
+    public RouteCommandResult SynchronizeDynamicRoute(RouteEntry route, bool waitForGateway = true)
+    {
+        if (!ValidateRoute(route, out string validationError))
+            return new RouteCommandResult { Success = false, Message = validationError };
+
+        if (!route.IsDynamicGateway)
+            return new RouteCommandResult { Success = false, Message = "该路由不是动态 DHCP 网关路由。" };
+
+        if (!IsAdministrator())
+            return new RouteCommandResult { Success = false, Message = "创建、同步动态路由需要以管理员身份运行 WinNetManager。" };
+
+        string script = BuildDynamicSyncScript(route, waitForGateway ? 8 : 1);
+        string output = ProcessRunner.RunPowerShell(
+            script,
+            out string error,
+            out int exitCode,
+            waitForGateway ? 30000 : 15000);
+
+        if (exitCode != 0 || HasRealPowerShellError(error))
+        {
+            string msg = (output + Environment.NewLine + error).Trim();
+            if (string.IsNullOrWhiteSpace(msg))
+                msg = $"动态路由同步失败（退出码 {exitCode}）。";
+            return new RouteCommandResult { Success = false, Message = msg };
+        }
+
+        string syncedLine = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(x => x.StartsWith("SYNCED|", StringComparison.Ordinal)) ?? "";
+        if (!string.IsNullOrWhiteSpace(syncedLine))
+        {
+            string gateway = syncedLine["SYNCED|".Length..].Trim();
+            route.NextHop = gateway;
+            route.DynamicCurrentGateway = gateway;
+            route.DynamicTaskStatus = "已注册/启用";
+            route.Store = "DynamicTask+PersistentStore";
+            return new RouteCommandResult
+            {
+                Success = true,
+                Message = $"已将 {route.DestinationPrefix} 同步到 {route.InterfaceAlias} 当前网关 {gateway}。"
+            };
+        }
+
+        if (output.IndexOf("NO_GATEWAY", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            route.DynamicCurrentGateway = "";
+            route.DynamicTaskStatus = "已注册/启用";
+            route.Store = "DynamicTask";
+            return new RouteCommandResult
+            {
+                Success = true,
+                Message = "计划任务已生效，但当前网卡尚未取得可用 IPv4 默认网关；本次未下发路由，将等待 DHCP/网络连接事件后自动重试。"
+            };
+        }
+
+        return new RouteCommandResult
+        {
+            Success = false,
+            Message = string.IsNullOrWhiteSpace(output)
+                ? "动态路由同步没有返回预期结果。"
+                : output.Trim()
+        };
+    }
+
+    private RouteCommandResult AddDynamicRoute(RouteEntry route)
+    {
+        if (!IsAdministrator())
+            return new RouteCommandResult { Success = false, Message = "创建动态 DHCP 网关路由需要以管理员身份运行 WinNetManager。" };
+
+        var taskResult = RegisterDynamicRouteTask(route);
+        if (!taskResult.Success)
+            return taskResult;
+
+        var syncResult = SynchronizeDynamicRoute(route, waitForGateway: false);
+        if (syncResult.Success)
+        {
+            route.IsDynamicGateway = true;
+            route.DynamicTaskStatus = "已注册/启用";
+            return syncResult;
+        }
+
+        // A task that cannot execute the same sync logic would only create a hidden,
+        // repeatedly failing background job. Roll it back on a real apply error.
+        _ = DeleteDynamicRouteTask(route);
+        return new RouteCommandResult
+        {
+            Success = false,
+            Message = $"计划任务已回滚，因为首次同步失败：{syncResult.Message}"
+        };
+    }
+
+    private RouteCommandResult DeleteDynamicRoute(RouteEntry route)
+    {
+        if (!IsAdministrator())
+            return new RouteCommandResult { Success = false, Message = "删除动态 DHCP 网关路由需要以管理员身份运行 WinNetManager。" };
+
+        // Delete the trigger first so a DHCP event cannot recreate the route while
+        // we are removing its current PersistentStore/ActiveStore entries.
+        var taskResult = DeleteDynamicRouteTask(route);
+        if (!taskResult.Success)
+            return taskResult;
+
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
+        string safePrefix = ProcessRunner.EscapePsSingleQuoted(route.DestinationPrefix);
+
+        string script =
+            $"$alias='{safeAlias}'; $prefix='{safePrefix}'; " +
+            "Get-NetRoute -PolicyStore PersistentStore -AddressFamily IPv4 -InterfaceAlias $alias -DestinationPrefix $prefix -ErrorAction SilentlyContinue | " +
+            "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; " +
+            "Get-NetRoute -PolicyStore ActiveStore -AddressFamily IPv4 -InterfaceAlias $alias -DestinationPrefix $prefix -ErrorAction SilentlyContinue | " +
+            "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue";
+
+        _ = ProcessRunner.RunPowerShell(script, out string error, out int exitCode, 20000);
+        if (exitCode != 0 || HasRealPowerShellError(error))
+        {
+            return new RouteCommandResult
+            {
+                Success = false,
+                Message = $"计划任务已删除，但当前路由项清理失败：{error.Trim()}"
+            };
+        }
+
+        return new RouteCommandResult
+        {
+            Success = true,
+            Message = $"已删除动态路由及计划任务 {route.DynamicTriggerTaskName}。"
+        };
+    }
+
+    private RouteCommandResult RegisterDynamicRouteTask(RouteEntry route)
+    {
+        var metadata = new DynamicRouteTaskMetadata
+        {
+            AddressFamily = route.AddressFamily,
+            DestinationPrefix = route.DestinationPrefix,
+            InterfaceAlias = route.InterfaceAlias,
+            RouteMetric = route.RouteMetric
+        };
+
+        string metadataJson = JsonSerializer.Serialize(metadata);
+        string description = DynamicDescriptionPrefix +
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(metadataJson));
+
+        string syncScript = BuildDynamicSyncScript(route, 10);
+        string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(syncScript));
+
+        const string subscription =
+            "<QueryList>" +
+            "<Query Id=\"0\" Path=\"Microsoft-Windows-Dhcp-Client/Operational\">" +
+            "<Select Path=\"Microsoft-Windows-Dhcp-Client/Operational\">*[System[(EventID=50036 or EventID=50047)]]</Select>" +
+            "</Query>" +
+            "<Query Id=\"1\" Path=\"Microsoft-Windows-NetworkProfile/Operational\">" +
+            "<Select Path=\"Microsoft-Windows-NetworkProfile/Operational\">*[System[(EventID=10000)]]</Select>" +
+            "</Query>" +
+            "</QueryList>";
+
+        XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+        var taskXml = new XDocument(
+            new XDeclaration("1.0", "utf-16", null),
+            new XElement(ns + "Task",
+                new XAttribute("version", "1.4"),
+                new XElement(ns + "RegistrationInfo",
+                    new XElement(ns + "Author", "WinNetManager"),
+                    new XElement(ns + "Description", description),
+                    new XElement(ns + "URI", "\\" + route.DynamicTriggerTaskName)),
+                new XElement(ns + "Triggers",
+                    // Boot trigger is only a safety net. The route still follows network/DHCP
+                    // events and the action itself waits briefly for a gateway to appear.
+                    new XElement(ns + "BootTrigger",
+                        new XElement(ns + "Enabled", "true"),
+                        new XElement(ns + "Delay", "PT15S")),
+                    new XElement(ns + "EventTrigger",
+                        new XElement(ns + "Enabled", "true"),
+                        new XElement(ns + "Delay", "PT3S"),
+                        new XElement(ns + "Subscription", subscription))),
+                new XElement(ns + "Principals",
+                    new XElement(ns + "Principal",
+                        new XAttribute("id", "Author"),
+                        new XElement(ns + "UserId", "S-1-5-18"),
+                        new XElement(ns + "LogonType", "ServiceAccount"),
+                        new XElement(ns + "RunLevel", "HighestAvailable"))),
+                new XElement(ns + "Settings",
+                    new XElement(ns + "MultipleInstancesPolicy", "IgnoreNew"),
+                    new XElement(ns + "DisallowStartIfOnBatteries", "false"),
+                    new XElement(ns + "StopIfGoingOnBatteries", "false"),
+                    new XElement(ns + "AllowHardTerminate", "true"),
+                    new XElement(ns + "StartWhenAvailable", "true"),
+                    new XElement(ns + "RunOnlyIfNetworkAvailable", "false"),
+                    new XElement(ns + "IdleSettings",
+                        new XElement(ns + "StopOnIdleEnd", "false"),
+                        new XElement(ns + "RestartOnIdle", "false")),
+                    new XElement(ns + "AllowStartOnDemand", "true"),
+                    new XElement(ns + "Enabled", "true"),
+                    new XElement(ns + "Hidden", "false"),
+                    new XElement(ns + "RunOnlyIfIdle", "false"),
+                    new XElement(ns + "WakeToRun", "false"),
+                    new XElement(ns + "ExecutionTimeLimit", "PT2M"),
+                    new XElement(ns + "Priority", "7")),
+                new XElement(ns + "Actions",
+                    new XAttribute("Context", "Author"),
+                    new XElement(ns + "Exec",
+                        new XElement(ns + "Command", "powershell.exe"),
+                        new XElement(ns + "Arguments",
+                            $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encodedCommand}")))));
+
+        string tempXml = Path.Combine(
+            Path.GetTempPath(),
+            $"WinNetManager-DynamicRoute-{Guid.NewGuid():N}.xml");
+
+        try
+        {
+            using (var writer = new StreamWriter(tempXml, false, Encoding.Unicode))
+                taskXml.Save(writer);
+
+            string args = $"/Create /TN \"{route.DynamicTriggerTaskName}\" /XML \"{tempXml}\" /F";
+            string output = ProcessRunner.RunNative(
+                "schtasks.exe",
+                args,
+                out string error,
+                out int exitCode,
+                20000);
+
+            if (exitCode == 0)
+            {
+                route.DynamicTaskStatus = "已注册/启用";
+                return new RouteCommandResult
+                {
+                    Success = true,
+                    Message = $"已注册计划任务 {route.DynamicTriggerTaskName}。"
+                };
+            }
+
+            return new RouteCommandResult
+            {
+                Success = false,
+                Message = FriendlyTaskSchedulerError(output, error, exitCode)
+            };
+        }
+        finally
+        {
+            try { if (File.Exists(tempXml)) File.Delete(tempXml); } catch { }
+        }
+    }
+
+    private RouteCommandResult DeleteDynamicRouteTask(RouteEntry route)
+    {
+        string taskName = route.DynamicTriggerTaskName;
+        if (!DynamicTaskExists(taskName))
+            return new RouteCommandResult { Success = true, Message = "对应计划任务已不存在。" };
+
+        string output = ProcessRunner.RunNative(
+            "schtasks.exe",
+            $"/Delete /TN \"{taskName}\" /F",
+            out string error,
+            out int exitCode,
+            15000);
+
+        return exitCode == 0
+            ? new RouteCommandResult { Success = true, Message = $"已删除计划任务 {taskName}。" }
+            : new RouteCommandResult
+            {
+                Success = false,
+                Message = FriendlyTaskSchedulerError(output, error, exitCode)
+            };
+    }
+
+    private static bool DynamicTaskExists(string taskName)
+    {
+        _ = ProcessRunner.RunNative(
+            "schtasks.exe",
+            $"/Query /TN \"{taskName.Replace("\"", "")}\"",
+            out _,
+            out int exitCode,
+            10000);
+        return exitCode == 0;
+    }
+
+    private static string BuildDynamicSyncScript(RouteEntry route, int attempts)
+    {
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
+        string safePrefix = ProcessRunner.EscapePsSingleQuoted(route.DestinationPrefix);
+        int safeAttempts = Math.Clamp(attempts, 1, 30);
+        string metric = int.TryParse(route.RouteMetric, out int parsedMetric)
+            ? Math.Clamp(parsedMetric, 0, 999999).ToString()
+            : "1";
+
+        return
+            "$ErrorActionPreference='Stop'; " +
+            $"$alias='{safeAlias}'; $prefix='{safePrefix}'; $metric={metric}; $gw=$null; " +
+            $"for($i=0; $i -lt {safeAttempts} -and -not $gw; $i++){{ " +
+            "$gw = Get-NetRoute -PolicyStore ActiveStore -AddressFamily IPv4 -InterfaceAlias $alias -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | " +
+            "Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } | Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop; " +
+            $"if(-not $gw -and $i -lt {safeAttempts - 1}){{ Start-Sleep -Seconds 2 }} }}; " +
+            "if(-not $gw){ Write-Output 'NO_GATEWAY'; exit 0 }; " +
+            "Get-NetRoute -PolicyStore PersistentStore -AddressFamily IPv4 -InterfaceAlias $alias -DestinationPrefix $prefix -ErrorAction SilentlyContinue | " +
+            "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; " +
+            "Get-NetRoute -PolicyStore ActiveStore -AddressFamily IPv4 -InterfaceAlias $alias -DestinationPrefix $prefix -ErrorAction SilentlyContinue | " +
+            "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; " +
+            "New-NetRoute -PolicyStore PersistentStore -AddressFamily IPv4 -InterfaceAlias $alias -DestinationPrefix $prefix -NextHop $gw -RouteMetric $metric -Confirm:$false -ErrorAction Stop | Out-Null; " +
+            "Write-Output ('SYNCED|' + $gw)";
+    }
+
+    private static bool IsAdministrator()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool HasRealPowerShellError(string? error) =>
+        !string.IsNullOrWhiteSpace(error) &&
+        error.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) < 0 &&
+        error.IndexOf("警告", StringComparison.OrdinalIgnoreCase) < 0;
+
+    private static string FriendlyTaskSchedulerError(string output, string error, int exitCode)
+    {
+        string msg = (output + Environment.NewLine + error).Trim();
+        if (ContainsIgnoreCase(msg, "Access is denied") ||
+            ContainsIgnoreCase(msg, "拒绝访问") ||
+            ContainsIgnoreCase(msg, "需要提升的权限"))
+            return "任务计划程序拒绝访问。请以管理员身份运行 WinNetManager。";
+
+        return string.IsNullOrWhiteSpace(msg)
+            ? $"任务计划程序操作失败（退出码 {exitCode}）。"
+            : msg;
+    }
+
     public RouteCommandResult AddRoute(RouteEntry route)
     {
         if (!ValidateRoute(route, out string validationError))
             return new RouteCommandResult { Success = false, Message = validationError };
+
+        if (route.IsDynamicGateway)
+            return AddDynamicRoute(route);
 
         string prefix = route.DestinationPrefix ?? "";
         string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
@@ -584,6 +919,9 @@ public class RoutingManager
     {
         if (!ValidateRoute(route, out string validationError))
             return new RouteCommandResult { Success = false, Message = validationError };
+
+        if (route.IsDynamicGateway)
+            return DeleteDynamicRoute(route);
 
         string prefix = route.DestinationPrefix ?? "";
         string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
