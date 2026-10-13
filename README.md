@@ -19,7 +19,7 @@ Windows 上分散、难记、危险的网络命令，被包装成**可解释、�
 | **连接名称** | 管理"以太网"/"WLAN"/"本地连接 *2"等连接名称，重命名/删除 | 注册表 |
 | **设备描述** | 重置设备描述实例编号（消除 #2 #3 后缀） | 注册表 (REG_MULTI_SZ) |
 | **幽灵网卡** | 枚举所有网卡（含隐藏设备），批量卸载幽灵设备 | SetupDi* P/Invoke |
-| **持久路由** | 管理 Windows 持久路由（IPv4/IPv6），新建/修改/删除，批量应用更改，路由测试（可绑定源地址），多网卡回源默认路由向导 | PowerShell NetTCPIP |
+| **持久路由** | 管理 Windows 持久路由（IPv4/IPv6），新建/修改/删除，批量应用更改；支持跟随指定网卡 DHCP 默认网关的动态下一跳路由，由 SYSTEM 计划任务在 DHCP/网络连接事件后自动自愈，无需主程序常驻；另含路由测试与多网卡回源默认路由向导 | PowerShell NetTCPIP + Task Scheduler |
 | **跃点数** | 统一管理网卡基础跃点、默认网关路由跃点与强/弱主机模型 | PowerShell NetTCPIP |
 | **端口转发** | 管理 `netsh interface portproxy` 端口转发规则，支持 IPv4/IPv6 四种方向，自动联动防火墙 | netsh |
 | **防火墙** | 管理入站允许规则，可绑定网卡与端口范围，默认对全部配置文件生效 | PowerShell NetSecurity |
@@ -35,6 +35,7 @@ Windows 上分散、难记、危险的网络命令，被包装成**可解释、�
 - **术语悬浮解释** — 关键列头（如 NRPT、PersistentStore、Metric）带 Tooltip 释义
 - **干运行导入预览** — 导入 JSON 配置前，先展示「新增/修改/跳过」清单，确认后再执行
 - **回源默认路由** — 只对选中网卡增加高跃点 0.0.0.0/0 与 ::/0，关闭弱主机，不替换其他网卡的默认网关
+- **动态 DHCP 网关路由** — IPv4 持久路由可选择「跟随网卡当前 DHCP 网关」；立即使用当前默认网关，并由 SYSTEM 事件触发计划任务在 DHCP 租约/网络连接变化后重新解析下一跳和重建路由，支持列表状态查看与手动强制同步
 - **路由测试** — 输入目标 IP/域名，自动解析并显示匹配路由 + Ping 延迟统计
 - **离线深度诊断包** — 网络完全断开、无法远程时，一键收集全量网络状态并压缩为 ZIP；覆盖 DHCP/DNS/IPv4/IPv6、路由、代理/VPN/GPO、WFP/Firewall、Wi-Fi/802.1X/WWAN、连接/端口压力与事件；采集步骤区分 OK/EMPTY/SKIP/WARN/FAIL，manifest 记录文件大小/行数；主动探测同时记录 Windows 选择的源 IP、出口网卡、下一跳与 Metric，HTTP/TCP 还记录实际 socket 本地/远端端点；支持用户指定故障目标的 DNS/Ping/TCP/HTTP/Traceroute、IPv6 Traceroute、10/30/60 秒 PktMon、生成中取消与总时间预算，默认只读且不采集密码
 - **智能 CIDR 编辑器** — 新建/编辑路由时，前缀长度下拉 + 实时网段范围计算 + IP 范围计算器
@@ -72,7 +73,7 @@ Windows 上分散、难记、危险的网络命令，被包装成**可解释、�
 3. **设备描述** — 重置实例编号为单实例
 4. **连接名称** — 删除无效连接条目，重命名剩余连接
 5. **网络配置文件** — 删除历史网络，重命名当前网络
-6. **持久路由** — 检查并整理系统持久路由表（IPv4/IPv6）。多网卡入站回源用「回源默认路由」向导：只给入站网卡加高跃点默认路由并设为强主机，不改主出口
+6. **持久路由** — 检查并整理系统持久路由表（IPv4/IPv6）。需要目标网段长期跟随某张 DHCP 网卡的当前网关时，可启用「动态自愈」；多网卡入站回源则使用「回源默认路由」向导：只给入站网卡加高跃点默认路由并设为强主机，不改主出口
 7. **端口转发** — 检查并整理 `netsh interface portproxy` 端口转发规则
 7.5. **防火墙** — 若路由已正确仍不通，再为入站端口添加允许规则并绑定入站网卡
 8. **IP 配置** — 必要时对指定网卡执行 DHCP Release+Renew
@@ -107,6 +108,7 @@ dotnet publish -c Release --self-contained -r win-x64 -p:PublishSingleFile=true
 - **COM**: 使用 `INetworkListManager` (CLSID `{DCB00C01-570F-4A9B-8D69-199FDBA5723B}`) 通过 dynamic 后期绑定调用
 - **P/Invoke**: 使用 `SetupDi*` API 族枚举设备树，`CM_Get_DevNode_Status` 判断设备是否存在
 - **PowerShell**: 通过 `Get-NetRoute` / `New-NetRoute` / `Remove-NetRoute` (NetTCPIP 模块) 管理持久路由，`Find-NetRoute` 做路由测试；`-EncodedCommand` + Base64 避免命令注入
+- **动态网关自愈**: 动态 IPv4 路由以计划任务元数据为配置源，使用 SYSTEM + Highest 权限运行内联 `-EncodedCommand`；监听 DHCP Client 50036/50047、NetworkProfile 10000，并有启动触发作为兜底。任务运行时按接口别名读取 ActiveStore 的 `0.0.0.0/0` 当前网关，再原子式重建目标 PersistentStore 路由；不落地常驻 ps1、不要求 WinNetManager 后台运行
 - **DNS NRPT**: 通过 `Add-DnsClientNrptRule` / `Get-DnsClientNrptRule` / `Remove-DnsClientNrptRule` 管理条件解析
 - **注册表**: 使用 `Microsoft.Win32.Registry` 读写，Descriptions 键为 REG_MULTI_SZ 格式
 - **导入导出**: JSON 配置文件格式，支持持久路由和端口转发的跨系统迁移，带版本校验

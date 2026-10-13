@@ -52,6 +52,8 @@
                     <ContextMenu>
                         <MenuItem Header="新建" Click="BtnNew_Click"/>
                         <MenuItem Header="修改" Click="BtnEdit_Click"/>
+                        <MenuItem Header="重新同步动态网关" Click="MenuSyncDynamicGateway_Click"
+                                  ToolTip="立即按所选网卡当前 IPv4 默认网关重建动态路由"/>
                         <Separator/>
                         <MenuItem Header="删除" Click="BtnDelete_Click" Foreground="{DynamicResource DangerBrush}"/>
                         <Separator/>
@@ -96,11 +98,18 @@
                             <TextBlock Text="目标前缀" ToolTip="目标网络的 CIDR 表示，如 192.168.1.0/24 或 default"/>
                         </DataGridTextColumn.Header>
                     </DataGridTextColumn>
-                    <DataGridTextColumn Binding="{Binding NextHopDisplay}" Width="Auto">
-                        <DataGridTextColumn.Header>
-                            <TextBlock Text="下一跳" ToolTip="数据包到达目标网络前，首先转发到的路由器地址"/>
-                        </DataGridTextColumn.Header>
-                    </DataGridTextColumn>
+                    <DataGridTemplateColumn Width="Auto" SortMemberPath="NextHopDisplay">
+                        <DataGridTemplateColumn.Header>
+                            <TextBlock Text="下一跳" ToolTip="固定路由显示具体下一跳；动态路由显示 [DHCP] 自动及当前网关"/>
+                        </DataGridTemplateColumn.Header>
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding NextHopDisplay}"
+                                           ToolTip="{Binding DynamicGatewayToolTip}"
+                                           VerticalAlignment="Center"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
                     <DataGridTextColumn Binding="{Binding InterfaceAlias}" Width="Auto">
                         <DataGridTextColumn.Header>
                             <TextBlock Text="接口别名" ToolTip="网卡显示名称，如「以太网」或「WLAN」"/>

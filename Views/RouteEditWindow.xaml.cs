@@ -15,6 +15,8 @@ public partial class RouteEditWindow : Window
     public RouteEntry Route { get; private set; }
     private readonly List<NetInterface> _allInterfaces;
     private readonly bool _isEdit;
+    private string _manualNextHopText = "";
+    private const string DynamicNextHopPlaceholder = "(自动获取当前网关)";
 
     public RouteEditWindow(RouteEntry? routeToEdit, List<NetInterface> interfaces)
     {
@@ -45,18 +47,22 @@ public partial class RouteEditWindow : Window
         RefreshInterfaceList();
         RefreshPrefixLengthItems();
         SyncPrefixFromRoute();
+        _manualNextHopText = Route.NextHop;
         TxtNextHop.Text = Route.NextHop;
         TxtMetric.Text = Route.RouteMetric;
+        ChkDynamicGateway.IsChecked = Route.IsDynamicGateway;
 
         if (!string.IsNullOrEmpty(Route.InterfaceAlias))
         {
             var existing = CmbInterface.Items.Cast<ComboBoxItem>()
-                .FirstOrDefault(i => i.Content?.ToString() == Route.InterfaceAlias);
+                .FirstOrDefault(i => i.Tag?.ToString() == Route.InterfaceAlias);
             if (existing != null)
                 CmbInterface.SelectedItem = existing;
             else
                 CmbInterface.Text = Route.InterfaceAlias;
         }
+
+        UpdateDynamicGatewayUi();
     }
 
     private void CmbAddressFamily_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -77,6 +83,55 @@ public partial class RouteEditWindow : Window
         {
             BtnToggleCalc.IsEnabled = true;
             BtnToggleCalc.Content = "使用范围计算器";
+        }
+
+        UpdateDynamicGatewayUi();
+    }
+
+    private void ChkDynamicGateway_Changed(object sender, RoutedEventArgs e)
+    {
+        UpdateDynamicGatewayUi();
+    }
+
+    private void UpdateDynamicGatewayUi()
+    {
+        if (ChkDynamicGateway == null || TxtNextHop == null || CmbInterface == null)
+            return;
+
+        string family = (CmbAddressFamily.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "IPv4";
+        bool ipv4 = family == "IPv4";
+
+        ChkDynamicGateway.IsEnabled = ipv4;
+        if (!ipv4 && ChkDynamicGateway.IsChecked == true)
+            ChkDynamicGateway.IsChecked = false;
+
+        bool dynamic = ipv4 && ChkDynamicGateway.IsChecked == true;
+        if (dynamic)
+        {
+            if (TxtNextHop.IsEnabled &&
+                !string.Equals(TxtNextHop.Text, DynamicNextHopPlaceholder, StringComparison.Ordinal))
+            {
+                _manualNextHopText = TxtNextHop.Text?.Trim() ?? "";
+            }
+
+            TxtNextHop.Text = DynamicNextHopPlaceholder;
+            TxtNextHop.IsEnabled = false;
+            CmbInterface.IsEditable = false;
+            TbkDynamicGatewayHint.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            bool wasPlaceholder = string.Equals(
+                TxtNextHop.Text,
+                DynamicNextHopPlaceholder,
+                StringComparison.Ordinal);
+
+            TxtNextHop.IsEnabled = true;
+            CmbInterface.IsEditable = true;
+            TbkDynamicGatewayHint.Visibility = Visibility.Collapsed;
+
+            if (wasPlaceholder)
+                TxtNextHop.Text = _manualNextHopText;
         }
     }
 
@@ -114,13 +169,14 @@ public partial class RouteEditWindow : Window
     {
         string family = (CmbAddressFamily.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "IPv4";
         string prefix = TxtDestinationPrefix.Text?.Trim() ?? "";
-        string nextHop = TxtNextHop.Text?.Trim() ?? "";
+        bool dynamicGateway = ChkDynamicGateway.IsChecked == true;
+        string nextHop = dynamicGateway ? "" : (TxtNextHop.Text?.Trim() ?? "");
         string metricText = TxtMetric.Text?.Trim() ?? "";
         string interfaceAlias = "";
 
         if (CmbInterface.SelectedItem is ComboBoxItem selectedItem)
             interfaceAlias = selectedItem.Tag?.ToString() ?? selectedItem.Content?.ToString() ?? "";
-        else
+        else if (!dynamicGateway)
             interfaceAlias = CmbInterface.Text?.Trim() ?? "";
 
         // 智能补全目标前缀掩码
@@ -138,7 +194,19 @@ public partial class RouteEditWindow : Window
 
         if (string.IsNullOrEmpty(interfaceAlias))
         {
-            CopyableMessageBox.Show("请输入或选择接口别名。", "输入无效", MessageBoxImage.Warning, this);
+            CopyableMessageBox.Show(
+                dynamicGateway
+                    ? "动态网关模式必须从列表中选择一张有效的 IPv4 网卡。"
+                    : "请输入或选择接口别名。",
+                "输入无效",
+                MessageBoxImage.Warning,
+                this);
+            return;
+        }
+
+        if (dynamicGateway && family != "IPv4")
+        {
+            CopyableMessageBox.Show("动态 DHCP 网关路由当前仅支持 IPv4。", "输入无效", MessageBoxImage.Warning, this);
             return;
         }
 
@@ -165,26 +233,32 @@ public partial class RouteEditWindow : Window
             return;
         }
 
-        if (family == "IPv4")
+        if (!dynamicGateway)
         {
-            if (!IPAddress.TryParse(nextHop, out IPAddress? ip) || ip?.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+            if (family == "IPv4")
             {
-                CopyableMessageBox.Show("下一跳必须是有效的 IPv4 地址。", "输入无效", MessageBoxImage.Warning, this);
-                return;
+                if (!IPAddress.TryParse(nextHop, out IPAddress? ip) || ip?.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    CopyableMessageBox.Show("下一跳必须是有效的 IPv4 地址。", "输入无效", MessageBoxImage.Warning, this);
+                    return;
+                }
             }
-        }
-        else
-        {
-            if (!IPAddress.TryParse(nextHop, out IPAddress? ip) || ip?.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+            else
             {
-                CopyableMessageBox.Show("下一跳必须是有效的 IPv6 地址。", "输入无效", MessageBoxImage.Warning, this);
-                return;
+                if (!IPAddress.TryParse(nextHop, out IPAddress? ip) || ip?.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+                {
+                    CopyableMessageBox.Show("下一跳必须是有效的 IPv6 地址。", "输入无效", MessageBoxImage.Warning, this);
+                    return;
+                }
             }
+    
+    
         }
 
         Route.AddressFamily = family;
         Route.DestinationPrefix = prefix;
         Route.NextHop = nextHop;
+        Route.IsDynamicGateway = dynamicGateway;
         Route.InterfaceAlias = interfaceAlias;
         Route.RouteMetric = metricText;
 
