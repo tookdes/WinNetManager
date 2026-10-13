@@ -183,10 +183,10 @@ public class RoutingManager
 
         // -PolicyStore 可能不支持，fallback 到注册表
         if (!string.IsNullOrEmpty(error) && (ContainsIgnoreCase(error, "Invalid parameter") || ContainsIgnoreCase(error, "参数无效")))
-            return GetPersistentRoutesViaRoutePrint(addressFamily);
+            return MergeDynamicManagedRoutes(GetPersistentRoutesViaRoutePrint(addressFamily), addressFamily);
 
         var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-        if (lines.Length < 2) return routes;
+        if (lines.Length < 2) return MergeDynamicManagedRoutes(routes, addressFamily);
 
         string[] headers = ParseCsvLine(lines[0]);
         int idxFamily = Array.IndexOf(headers, "AddressFamily");
@@ -213,7 +213,7 @@ public class RoutingManager
             });
         }
 
-        return routes;
+        return MergeDynamicManagedRoutes(routes, addressFamily);
     }
 
     /// <summary>
@@ -306,6 +306,185 @@ public class RoutingManager
         }
 
         return routes;
+    }
+
+
+    private List<RouteEntry> MergeDynamicManagedRoutes(List<RouteEntry> routes, string? addressFamily)
+    {
+        List<RouteEntry> managed;
+        try { managed = GetDynamicManagedRoutes(); }
+        catch { return routes; }
+
+        foreach (var dynamicRoute in managed)
+        {
+            if (!string.IsNullOrWhiteSpace(addressFamily) &&
+                !string.Equals(dynamicRoute.AddressFamily, addressFamily, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var existing = routes.FirstOrDefault(r =>
+                string.Equals(r.AddressFamily, dynamicRoute.AddressFamily, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(r.DestinationPrefix, dynamicRoute.DestinationPrefix, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(r.InterfaceAlias, dynamicRoute.InterfaceAlias, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null)
+            {
+                existing.IsDynamicGateway = true;
+                existing.DynamicCurrentGateway = dynamicRoute.DynamicCurrentGateway;
+                existing.DynamicTaskStatus = dynamicRoute.DynamicTaskStatus;
+                existing.RouteMetric = dynamicRoute.RouteMetric;
+                existing.Store = "DynamicTask+PersistentStore";
+            }
+            else
+            {
+                routes.Add(dynamicRoute);
+            }
+        }
+
+        return routes;
+    }
+
+    private List<RouteEntry> GetDynamicManagedRoutes()
+    {
+        var routes = new List<RouteEntry>();
+        string output = ProcessRunner.RunNative(
+            "schtasks.exe",
+            "/Query /FO CSV /NH",
+            out _,
+            out int exitCode,
+            20000);
+
+        if (exitCode != 0 || string.IsNullOrWhiteSpace(output))
+            return routes;
+
+        foreach (string line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] fields = CsvParser.ParseLine(line);
+            if (fields.Length == 0)
+                continue;
+
+            string taskPath = fields[0].Trim();
+            string leafName = taskPath.TrimStart('\\')
+                .Split('\\', StringSplitOptions.RemoveEmptyEntries)
+                .LastOrDefault() ?? "";
+
+            if (!leafName.StartsWith(DynamicTaskPrefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string xml = ProcessRunner.RunNative(
+                "schtasks.exe",
+                $"/Query /TN \"{taskPath.Replace("\"", "")}\" /XML",
+                out _,
+                out int xmlExit,
+                15000);
+
+            if (xmlExit != 0 || string.IsNullOrWhiteSpace(xml))
+                continue;
+
+            DynamicRouteTaskMetadata? metadata = ParseDynamicTaskMetadata(xml);
+            if (metadata == null || metadata.Version != 1)
+                continue;
+
+            bool enabled = ParseTaskEnabled(xml);
+            string currentGateway = GetCurrentDefaultGateway(metadata.InterfaceAlias);
+            string installedHop = GetInstalledDynamicRouteNextHop(
+                metadata.InterfaceAlias,
+                metadata.DestinationPrefix);
+
+            routes.Add(new RouteEntry
+            {
+                AddressFamily = metadata.AddressFamily,
+                DestinationPrefix = metadata.DestinationPrefix,
+                NextHop = installedHop,
+                InterfaceAlias = metadata.InterfaceAlias,
+                RouteMetric = metadata.RouteMetric,
+                Store = "DynamicTask",
+                IsDynamicGateway = true,
+                DynamicCurrentGateway = currentGateway,
+                DynamicTaskStatus = enabled ? "已注册/启用" : "已注册/禁用"
+            });
+        }
+
+        return routes;
+    }
+
+    private static DynamicRouteTaskMetadata? ParseDynamicTaskMetadata(string xml)
+    {
+        try
+        {
+            var doc = XDocument.Parse(xml);
+            XNamespace ns = doc.Root?.Name.Namespace ?? XNamespace.None;
+            string description = doc.Descendants(ns + "Description").FirstOrDefault()?.Value ?? "";
+            if (!description.StartsWith(DynamicDescriptionPrefix, StringComparison.Ordinal))
+                return null;
+
+            string payload = description[DynamicDescriptionPrefix.Length..];
+            byte[] jsonBytes = Convert.FromBase64String(payload);
+            return JsonSerializer.Deserialize<DynamicRouteTaskMetadata>(
+                Encoding.UTF8.GetString(jsonBytes));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool ParseTaskEnabled(string xml)
+    {
+        try
+        {
+            var doc = XDocument.Parse(xml);
+            XNamespace ns = doc.Root?.Name.Namespace ?? XNamespace.None;
+            string? enabled = doc.Root?
+                .Element(ns + "Settings")?
+                .Element(ns + "Enabled")?
+                .Value;
+            return !string.Equals(enabled, "false", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    public string GetCurrentDefaultGateway(string interfaceAlias)
+    {
+        if (string.IsNullOrWhiteSpace(interfaceAlias))
+            return "";
+
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(interfaceAlias);
+        string script =
+            $"$r = Get-NetRoute -PolicyStore ActiveStore -AddressFamily IPv4 -InterfaceAlias '{safeAlias}' " +
+            "-DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | " +
+            "Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } | " +
+            "Sort-Object RouteMetric | Select-Object -First 1; " +
+            "if($r){ $r.NextHop }";
+
+        string output = RunPowerShell(script, out _, 15000).Trim();
+        return IPAddress.TryParse(output, out var gateway) &&
+               gateway.AddressFamily == AddressFamily.InterNetwork
+            ? gateway.ToString()
+            : "";
+    }
+
+    private string GetInstalledDynamicRouteNextHop(string interfaceAlias, string destinationPrefix)
+    {
+        if (string.IsNullOrWhiteSpace(interfaceAlias) || string.IsNullOrWhiteSpace(destinationPrefix))
+            return "";
+
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(interfaceAlias);
+        string safePrefix = ProcessRunner.EscapePsSingleQuoted(destinationPrefix);
+        string script =
+            $"$r = Get-NetRoute -AddressFamily IPv4 -InterfaceAlias '{safeAlias}' " +
+            $"-DestinationPrefix '{safePrefix}' -ErrorAction SilentlyContinue | " +
+            "Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } | " +
+            "Sort-Object RouteMetric | Select-Object -First 1; " +
+            "if($r){ $r.NextHop }";
+
+        string output = RunPowerShell(script, out _, 15000).Trim();
+        return IPAddress.TryParse(output, out var hop) &&
+               hop.AddressFamily == AddressFamily.InterNetwork
+            ? hop.ToString()
+            : "";
     }
 
     private static bool ContainsIgnoreCase(string source, string value)
