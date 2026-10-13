@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Principal;
 using System.Text;
+using System.Text.Json;
+using System.Xml.Linq;
 using WinNetManager.Models;
 
 namespace WinNetManager.Services;
@@ -22,9 +26,21 @@ public class NetInterface
     public string AddressFamily { get; set; } = "";
 }
 
+internal sealed class DynamicRouteTaskMetadata
+{
+    public int Version { get; set; } = 1;
+    public string AddressFamily { get; set; } = "IPv4";
+    public string DestinationPrefix { get; set; } = "";
+    public string InterfaceAlias { get; set; } = "";
+    public string RouteMetric { get; set; } = "1";
+}
+
+
 public class RoutingManager
 {
     private static readonly string[] ValidAddressFamilies = { "IPv4", "IPv6" };
+    private const string DynamicTaskPrefix = "WinNetManager_DynamicRoute_";
+    private const string DynamicDescriptionPrefix = "WinNetManager.DynamicRoute.v1:";
 
     private string RunPowerShell(string script, out string error, int timeoutMs = 30000)
         => ProcessRunner.RunPowerShell(script, out error, timeoutMs);
@@ -55,26 +71,6 @@ public class RoutingManager
             return false;
         }
 
-        if (!IPAddress.TryParse(route.NextHop?.Trim(), out var nextHop))
-        {
-            error = "下一跳必须是有效 IP 地址。";
-            return false;
-        }
-
-        if (route.AddressFamily == "IPv4" && nextHop.AddressFamily != AddressFamily.InterNetwork)
-        {
-            error = "IPv4 路由的下一跳必须是 IPv4 地址。";
-            return false;
-        }
-
-        if (route.AddressFamily == "IPv6" && nextHop.AddressFamily != AddressFamily.InterNetworkV6)
-        {
-            error = "IPv6 路由的下一跳必须是 IPv6 地址。";
-            return false;
-        }
-
-        route.NextHop = nextHop.ToString();
-
         string alias = route.InterfaceAlias?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(alias) || ContainsControlChars(alias))
         {
@@ -82,6 +78,52 @@ public class RoutingManager
             return false;
         }
         route.InterfaceAlias = alias;
+
+        if (route.IsDynamicGateway)
+        {
+            if (route.AddressFamily != "IPv4")
+            {
+                error = "动态 DHCP 网关路由当前仅支持 IPv4；IPv6 默认路由通常由 Router Advertisement 管理。";
+                return false;
+            }
+
+            // Dynamic routes intentionally allow an empty NextHop: the task resolves the
+            // selected interface's current default gateway at apply/run time.
+            if (!string.IsNullOrWhiteSpace(route.NextHop))
+            {
+                if (!IPAddress.TryParse(route.NextHop.Trim(), out var observedHop) ||
+                    observedHop.AddressFamily != AddressFamily.InterNetwork)
+                {
+                    route.NextHop = "";
+                }
+                else
+                {
+                    route.NextHop = observedHop.ToString();
+                }
+            }
+        }
+        else
+        {
+            if (!IPAddress.TryParse(route.NextHop?.Trim(), out var nextHop))
+            {
+                error = "下一跳必须是有效 IP 地址。";
+                return false;
+            }
+
+            if (route.AddressFamily == "IPv4" && nextHop.AddressFamily != AddressFamily.InterNetwork)
+            {
+                error = "IPv4 路由的下一跳必须是 IPv4 地址。";
+                return false;
+            }
+
+            if (route.AddressFamily == "IPv6" && nextHop.AddressFamily != AddressFamily.InterNetworkV6)
+            {
+                error = "IPv6 路由的下一跳必须是 IPv6 地址。";
+                return false;
+            }
+
+            route.NextHop = nextHop.ToString();
+        }
 
         if (!int.TryParse(route.RouteMetric?.Trim(), out int metric) || metric < 0 || metric > 999999)
         {
