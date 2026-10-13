@@ -270,7 +270,7 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
             foreach (var r in toModify)
             {
                 var orig = _originalSnapshots.GetValueOrDefault(r);
-                sb.AppendLine($"  • {orig?.DestinationDisplay ?? r.DestinationDisplay} via {orig?.NextHopDisplay ?? r.NextHopDisplay}Display}");
+                sb.AppendLine($"  • {orig?.DestinationDisplay ?? r.DestinationDisplay} via {orig?.NextHopDisplay ?? r.NextHopDisplay}");
                 sb.AppendLine($"    → {r.DestinationDisplay} via {r.NextHopDisplay}  (接口: {r.InterfaceAlias}, 度量: {r.RouteMetric})");
             }
             sb.AppendLine();
@@ -514,13 +514,23 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
     private static bool AreEqual(RouteEntry a, RouteEntry b)
     {
         if (a == null || b == null) return a == b;
-        return a.AddressFamily == b.AddressFamily
+
+        bool sameBase = a.AddressFamily == b.AddressFamily
             && a.DestinationPrefix == b.DestinationPrefix
-            && a.NextHop == b.NextHop
-            && a.InterfaceAlias == b.InterfaceAlias
-            && a.InterfaceIndex == b.InterfaceIndex
+            && string.Equals(a.InterfaceAlias, b.InterfaceAlias, StringComparison.OrdinalIgnoreCase)
             && a.RouteMetric == b.RouteMetric
             && a.IsDynamicGateway == b.IsDynamicGateway;
+
+        if (!sameBase)
+            return false;
+
+        // The installed next hop and interface index are runtime observations for a
+        // dynamic route, not configuration identity.
+        if (a.IsDynamicGateway)
+            return true;
+
+        return a.NextHop == b.NextHop
+            && a.InterfaceIndex == b.InterfaceIndex;
     }
 
     // --- 导入导出 ---
