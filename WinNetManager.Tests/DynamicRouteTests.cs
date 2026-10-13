@@ -125,6 +125,15 @@ public class DynamicRouteTests
                 10000);
 
             Assert.True(queryCode == 0, queryError);
+
+            // Also verify the production discovery path can parse schtasks /Query /XML
+            // and reconstruct the route definition from the task description.
+            var discovered = new RoutingManager().GetPersistentRoutes();
+            Assert.Contains(discovered, r =>
+                r.IsDynamicGateway &&
+                r.InterfaceAlias == route.InterfaceAlias &&
+                r.DestinationPrefix == route.DestinationPrefix &&
+                r.DynamicTaskStatus.Contains("已注册", StringComparison.Ordinal));
         }
         finally
         {
