@@ -503,7 +503,16 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
         e.Column.SortDirection = dir;
         var view = CollectionViewSource.GetDefaultView(RoutesGrid.ItemsSource);
         view.SortDescriptions.Clear();
-        string prop = (e.Column as DataGridBoundColumn)?.Binding is Binding b ? b.Path.Path : "";
+        string prop = e.Column.SortMemberPath;
+        if (string.IsNullOrWhiteSpace(prop) &&
+            (e.Column as DataGridBoundColumn)?.Binding is Binding b)
+        {
+            prop = b.Path.Path;
+        }
+
+        if (string.IsNullOrWhiteSpace(prop))
+            return;
+
         view.SortDescriptions.Add(new SortDescription(prop, dir));
         if (view is ListCollectionView lcv)
             lcv.CustomSort = new NaturalSortByProperty(prop, dir);
