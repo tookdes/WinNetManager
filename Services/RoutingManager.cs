@@ -756,8 +756,9 @@ public class RoutingManager
                         new XElement(ns + "Delay", "PT15S")),
                     new XElement(ns + "EventTrigger",
                         new XElement(ns + "Enabled", "true"),
-                        new XElement(ns + "Delay", "PT3S"),
-                        new XElement(ns + "Subscription", subscription))),
+                        // eventTriggerType requires Subscription before Delay.
+                        new XElement(ns + "Subscription", subscription),
+                        new XElement(ns + "Delay", "PT3S"))),
                 new XElement(ns + "Principals",
                     new XElement(ns + "Principal",
                         new XAttribute("id", "Author"),
