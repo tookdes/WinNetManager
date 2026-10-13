@@ -672,80 +672,7 @@ public class RoutingManager
 
     private RouteCommandResult RegisterDynamicRouteTask(RouteEntry route)
     {
-        var metadata = new DynamicRouteTaskMetadata
-        {
-            AddressFamily = route.AddressFamily,
-            DestinationPrefix = route.DestinationPrefix,
-            InterfaceAlias = route.InterfaceAlias,
-            RouteMetric = route.RouteMetric
-        };
-
-        string metadataJson = JsonSerializer.Serialize(metadata);
-        string description = DynamicDescriptionPrefix +
-            Convert.ToBase64String(Encoding.UTF8.GetBytes(metadataJson));
-
-        string syncScript = BuildDynamicSyncScript(route, 10);
-        string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(syncScript));
-
-        const string subscription =
-            "<QueryList>" +
-            "<Query Id=\"0\" Path=\"Microsoft-Windows-Dhcp-Client/Operational\">" +
-            "<Select Path=\"Microsoft-Windows-Dhcp-Client/Operational\">*[System[(EventID=50036 or EventID=50047)]]</Select>" +
-            "</Query>" +
-            "<Query Id=\"1\" Path=\"Microsoft-Windows-NetworkProfile/Operational\">" +
-            "<Select Path=\"Microsoft-Windows-NetworkProfile/Operational\">*[System[(EventID=10000)]]</Select>" +
-            "</Query>" +
-            "</QueryList>";
-
-        XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
-        var taskXml = new XDocument(
-            new XDeclaration("1.0", "utf-16", null),
-            new XElement(ns + "Task",
-                new XAttribute("version", "1.4"),
-                new XElement(ns + "RegistrationInfo",
-                    new XElement(ns + "Author", "WinNetManager"),
-                    new XElement(ns + "Description", description),
-                    new XElement(ns + "URI", "\\" + route.DynamicTriggerTaskName)),
-                new XElement(ns + "Triggers",
-                    // Boot trigger is only a safety net. The route still follows network/DHCP
-                    // events and the action itself waits briefly for a gateway to appear.
-                    new XElement(ns + "BootTrigger",
-                        new XElement(ns + "Enabled", "true"),
-                        new XElement(ns + "Delay", "PT15S")),
-                    new XElement(ns + "EventTrigger",
-                        new XElement(ns + "Enabled", "true"),
-                        new XElement(ns + "Delay", "PT3S"),
-                        new XElement(ns + "Subscription", subscription))),
-                new XElement(ns + "Principals",
-                    new XElement(ns + "Principal",
-                        new XAttribute("id", "Author"),
-                        new XElement(ns + "UserId", "S-1-5-18"),
-                        new XElement(ns + "LogonType", "ServiceAccount"),
-                        new XElement(ns + "RunLevel", "HighestAvailable"))),
-                new XElement(ns + "Settings",
-                    new XElement(ns + "MultipleInstancesPolicy", "IgnoreNew"),
-                    new XElement(ns + "DisallowStartIfOnBatteries", "false"),
-                    new XElement(ns + "StopIfGoingOnBatteries", "false"),
-                    new XElement(ns + "AllowHardTerminate", "true"),
-                    new XElement(ns + "StartWhenAvailable", "true"),
-                    new XElement(ns + "RunOnlyIfNetworkAvailable", "false"),
-                    new XElement(ns + "IdleSettings",
-                        new XElement(ns + "StopOnIdleEnd", "false"),
-                        new XElement(ns + "RestartOnIdle", "false")),
-                    new XElement(ns + "AllowStartOnDemand", "true"),
-                    new XElement(ns + "Enabled", "true"),
-                    new XElement(ns + "Hidden", "false"),
-                    new XElement(ns + "RunOnlyIfIdle", "false"),
-                    new XElement(ns + "WakeToRun", "false"),
-                    new XElement(ns + "ExecutionTimeLimit", "PT2M"),
-                    new XElement(ns + "Priority", "7")),
-                new XElement(ns + "Actions",
-                    new XAttribute("Context", "Author"),
-                    new XElement(ns + "Exec",
-                        new XElement(ns + "Command", "powershell.exe"),
-                        new XElement(ns + "Arguments",
-                            $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encodedCommand}")))));
-
+        XDocument taskXml = BuildDynamicTaskXml(route);
         string tempXml = Path.Combine(
             Path.GetTempPath(),
             $"WinNetManager-DynamicRoute-{Guid.NewGuid():N}.xml");
@@ -785,6 +712,83 @@ public class RoutingManager
         }
     }
 
+    internal static XDocument BuildDynamicTaskXml(RouteEntry route)
+    {
+        var metadata = new DynamicRouteTaskMetadata
+        {
+            AddressFamily = route.AddressFamily,
+            DestinationPrefix = route.DestinationPrefix,
+            InterfaceAlias = route.InterfaceAlias,
+            RouteMetric = route.RouteMetric
+        };
+
+        string metadataJson = JsonSerializer.Serialize(metadata);
+        string description = DynamicDescriptionPrefix +
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(metadataJson));
+
+        string syncScript = BuildDynamicSyncScript(route, 10);
+        string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(syncScript));
+
+        const string subscription =
+            "<QueryList>" +
+            "<Query Id=\"0\" Path=\"Microsoft-Windows-Dhcp-Client/Operational\">" +
+            "<Select Path=\"Microsoft-Windows-Dhcp-Client/Operational\">*[System[(EventID=50036 or EventID=50047)]]</Select>" +
+            "</Query>" +
+            "<Query Id=\"1\" Path=\"Microsoft-Windows-NetworkProfile/Operational\">" +
+            "<Select Path=\"Microsoft-Windows-NetworkProfile/Operational\">*[System[(EventID=10000)]]</Select>" +
+            "</Query>" +
+            "</QueryList>";
+
+        XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+        return new XDocument(
+            new XDeclaration("1.0", "utf-16", null),
+            new XElement(ns + "Task",
+                new XAttribute("version", "1.4"),
+                new XElement(ns + "RegistrationInfo",
+                    new XElement(ns + "Author", "WinNetManager"),
+                    new XElement(ns + "Description", description),
+                    new XElement(ns + "URI", "\\" + route.DynamicTriggerTaskName)),
+                new XElement(ns + "Triggers",
+                    // Boot trigger is a safety net. Event triggers remain the primary
+                    // mechanism, so WinNetManager itself never needs to stay resident.
+                    new XElement(ns + "BootTrigger",
+                        new XElement(ns + "Enabled", "true"),
+                        new XElement(ns + "Delay", "PT15S")),
+                    new XElement(ns + "EventTrigger",
+                        new XElement(ns + "Enabled", "true"),
+                        new XElement(ns + "Delay", "PT3S"),
+                        new XElement(ns + "Subscription", subscription))),
+                new XElement(ns + "Principals",
+                    new XElement(ns + "Principal",
+                        new XAttribute("id", "Author"),
+                        new XElement(ns + "UserId", "S-1-5-18"),
+                        new XElement(ns + "LogonType", "ServiceAccount"),
+                        new XElement(ns + "RunLevel", "HighestAvailable"))),
+                new XElement(ns + "Settings",
+                    new XElement(ns + "MultipleInstancesPolicy", "IgnoreNew"),
+                    new XElement(ns + "DisallowStartIfOnBatteries", "false"),
+                    new XElement(ns + "StopIfGoingOnBatteries", "false"),
+                    new XElement(ns + "AllowHardTerminate", "true"),
+                    new XElement(ns + "StartWhenAvailable", "true"),
+                    new XElement(ns + "RunOnlyIfNetworkAvailable", "false"),
+                    new XElement(ns + "IdleSettings",
+                        new XElement(ns + "StopOnIdleEnd", "false"),
+                        new XElement(ns + "RestartOnIdle", "false")),
+                    new XElement(ns + "AllowStartOnDemand", "true"),
+                    new XElement(ns + "Enabled", "true"),
+                    new XElement(ns + "Hidden", "false"),
+                    new XElement(ns + "RunOnlyIfIdle", "false"),
+                    new XElement(ns + "WakeToRun", "false"),
+                    new XElement(ns + "ExecutionTimeLimit", "PT2M"),
+                    new XElement(ns + "Priority", "7")),
+                new XElement(ns + "Actions",
+                    new XAttribute("Context", "Author"),
+                    new XElement(ns + "Exec",
+                        new XElement(ns + "Command", "powershell.exe"),
+                        new XElement(ns + "Arguments",
+                            $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encodedCommand}")))));
+    }
+
     private RouteCommandResult DeleteDynamicRouteTask(RouteEntry route)
     {
         string taskName = route.DynamicTriggerTaskName;
@@ -818,7 +822,7 @@ public class RoutingManager
         return exitCode == 0;
     }
 
-    private static string BuildDynamicSyncScript(RouteEntry route, int attempts)
+    internal static string BuildDynamicSyncScript(RouteEntry route, int attempts)
     {
         string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
         string safePrefix = ProcessRunner.EscapePsSingleQuoted(route.DestinationPrefix);
