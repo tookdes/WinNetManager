@@ -10,7 +10,7 @@ namespace WinNetManager.Services;
 public class WinNetConfig
 {
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
 
     [JsonPropertyName("exportDate")]
     public DateTime ExportDate { get; set; }
@@ -41,6 +41,9 @@ public class RouteConfig
 
     [JsonPropertyName("routeMetric")]
     public string RouteMetric { get; set; } = "";
+
+    [JsonPropertyName("isDynamicGateway")]
+    public bool IsDynamicGateway { get; set; }
 }
 
 public class ProxyConfig
@@ -79,7 +82,7 @@ public static class ConfigExportService
         File.WriteAllText(filePath, json);
     }
 
-    private const int SupportedVersion = 1;
+    private const int SupportedVersion = 2;
 
     public static WinNetConfig Import(string filePath)
     {
@@ -116,6 +119,7 @@ public static class ConfigExportService
                 InterfaceAlias = r.InterfaceAlias,
                 InterfaceIndex = r.InterfaceIndex,
                 RouteMetric = r.RouteMetric,
+                IsDynamicGateway = r.IsDynamicGateway,
             });
         }
         return result;
@@ -134,7 +138,8 @@ public static class ConfigExportService
                 InterfaceAlias = c.InterfaceAlias,
                 InterfaceIndex = c.InterfaceIndex,
                 RouteMetric = c.RouteMetric,
-                Store = "PersistentStore",
+                IsDynamicGateway = c.IsDynamicGateway,
+                Store = c.IsDynamicGateway ? "DynamicTask" : "PersistentStore",
             });
         }
         return result;
