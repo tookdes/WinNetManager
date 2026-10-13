@@ -72,7 +72,9 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
             || (route.NextHop?.ToLowerInvariant().Contains(filter) == true)
             || (route.InterfaceAlias?.ToLowerInvariant().Contains(filter) == true)
             || (route.AddressFamily?.ToLowerInvariant().Contains(filter) == true)
-            || (route.RouteMetric?.ToLowerInvariant().Contains(filter) == true);
+            || (route.RouteMetric?.ToLowerInvariant().Contains(filter) == true)
+            || (route.DynamicTaskStatus?.ToLowerInvariant().Contains(filter) == true)
+            || (route.IsDynamicGateway && "dhcp 动态 自动".Contains(filter));
     }
 
     private void UpdateCount()
@@ -175,6 +177,9 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
                 route.AddressFamily = edited.AddressFamily;
                 route.DestinationPrefix = edited.DestinationPrefix;
                 route.NextHop = edited.NextHop;
+                route.IsDynamicGateway = edited.IsDynamicGateway;
+                route.DynamicCurrentGateway = edited.DynamicCurrentGateway;
+                route.DynamicTaskStatus = edited.DynamicTaskStatus;
                 route.InterfaceAlias = edited.InterfaceAlias;
                 route.RouteMetric = edited.RouteMetric;
 
@@ -255,7 +260,7 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
         {
             sb.AppendLine($"删除 ({toDelete.Count})：");
             foreach (var r in toDelete)
-                sb.AppendLine($"  • {r.DestinationDisplay}  via  {r.NextHop}");
+                sb.AppendLine($"  • {r.DestinationDisplay}  via  {r.NextHopDisplay}");
             sb.AppendLine();
         }
 
@@ -265,8 +270,8 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
             foreach (var r in toModify)
             {
                 var orig = _originalSnapshots.GetValueOrDefault(r);
-                sb.AppendLine($"  • {orig?.DestinationDisplay ?? r.DestinationDisplay} via {orig?.NextHop ?? r.NextHop}");
-                sb.AppendLine($"    → {r.DestinationDisplay} via {r.NextHop}  (接口: {r.InterfaceAlias}, 度量: {r.RouteMetric})");
+                sb.AppendLine($"  • {orig?.DestinationDisplay ?? r.DestinationDisplay} via {orig?.NextHopDisplay ?? r.NextHopDisplay}Display}");
+                sb.AppendLine($"    → {r.DestinationDisplay} via {r.NextHopDisplay}  (接口: {r.InterfaceAlias}, 度量: {r.RouteMetric})");
             }
             sb.AppendLine();
         }
@@ -275,7 +280,7 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
         {
             sb.AppendLine($"新增 ({toAdd.Count})：");
             foreach (var r in toAdd)
-                sb.AppendLine($"  • {r.DestinationDisplay}  via  {r.NextHop}  (接口: {r.InterfaceAlias}, 度量: {r.RouteMetric})");
+                sb.AppendLine($"  • {r.DestinationDisplay}  via  {r.NextHopDisplay}  (接口: {r.InterfaceAlias}, 度量: {r.RouteMetric})");
             sb.AppendLine();
         }
 
@@ -374,9 +379,17 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
 
     private static string GetRouteCommand(RouteEntry route, bool isDelete)
     {
-        string safeAlias = route.InterfaceAlias.Replace("'", "''");
-        string safeHop = route.NextHop.Replace("'", "''");
+        string safeAlias = ProcessRunner.EscapePsSingleQuoted(route.InterfaceAlias);
+        string safeHop = ProcessRunner.EscapePsSingleQuoted(route.NextHop);
         string prefix = route.DestinationPrefix ?? "";
+
+        if (route.IsDynamicGateway)
+        {
+            if (isDelete)
+                return $"# 删除动态路由 {prefix} / {route.InterfaceAlias}，并删除计划任务 {route.DynamicTriggerTaskName}";
+
+            return $"# 动态路由 {prefix}：计划任务 {route.DynamicTriggerTaskName} 将跟随接口 '{safeAlias}' 当前 IPv4 默认网关并以 metric {route.RouteMetric} 重建路由";
+        }
 
         if (route.AddressFamily == "IPv6")
         {
@@ -384,12 +397,10 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
                 return $"netsh interface ipv6 delete route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} store=persistent";
             return $"netsh interface ipv6 add route prefix={prefix} interface='{safeAlias}' nexthop={safeHop} metric={route.RouteMetric} store=persistent";
         }
-        else
-        {
-            if (isDelete)
-                return $"netsh interface ipv4 delete route {prefix} interface='{safeAlias}' nexthop={safeHop} store=persistent";
-            return $"netsh interface ipv4 add route {prefix} interface='{safeAlias}' nexthop={safeHop} metric={route.RouteMetric} store=persistent";
-        }
+
+        if (isDelete)
+            return $"netsh interface ipv4 delete route {prefix} interface='{safeAlias}' nexthop={safeHop} store=persistent";
+        return $"netsh interface ipv4 add route {prefix} interface='{safeAlias}' nexthop={safeHop} metric={route.RouteMetric} store=persistent";
     }
 
     private static void ShowApplyResult(List<string> successes, List<string> errors)
@@ -443,6 +454,44 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
     private void MenuCopy_Click(object sender, RoutedEventArgs e) =>
         NetworkProfileTab.CopySelectedCellValue(RoutesGrid);
 
+    private async void MenuSyncDynamicGateway_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = GetSelected()
+            .Where(r => r.Status != ChangeStatus.Deleted && r.IsDynamicGateway)
+            .ToList();
+
+        if (selected.Count == 0)
+        {
+            CopyableMessageBox.Show(
+                "请选择至少一条 [DHCP] 动态网关路由。",
+                "没有动态路由",
+                MessageBoxImage.Information);
+            return;
+        }
+
+        SetStatus($"正在同步 {selected.Count} 条动态网关路由...");
+
+        var results = await Task.Run(() =>
+        {
+            var ok = new List<string>();
+            var errors = new List<string>();
+
+            foreach (var route in selected)
+            {
+                var result = _manager.SynchronizeDynamicRoute(route, waitForGateway: true);
+                if (result.Success)
+                    ok.Add($"{route.DestinationDisplay} / {route.InterfaceAlias}: {result.Message}");
+                else
+                    errors.Add($"{route.DestinationDisplay} / {route.InterfaceAlias}: {result.Message}");
+            }
+
+            return (ok, errors);
+        });
+
+        ShowApplyResult(results.ok, results.errors);
+        await LoadRoutesAsync();
+    }
+
     // --- 排序 ---
 
     private void Grid_Sorting(object sender, DataGridSortingEventArgs e)
@@ -470,7 +519,8 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
             && a.NextHop == b.NextHop
             && a.InterfaceAlias == b.InterfaceAlias
             && a.InterfaceIndex == b.InterfaceIndex
-            && a.RouteMetric == b.RouteMetric;
+            && a.RouteMetric == b.RouteMetric
+            && a.IsDynamicGateway == b.IsDynamicGateway;
     }
 
     // --- 导入导出 ---
@@ -583,7 +633,7 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
             {
                 sb.AppendLine("新增项：");
                 foreach (var r in toAdd)
-                    sb.AppendLine($"  • {r.DestinationDisplay} via {r.NextHop} (接口: {r.InterfaceAlias}, 度量: {r.RouteMetric})");
+                    sb.AppendLine($"  • {r.DestinationDisplay} via {r.NextHopDisplay} (接口: {r.InterfaceAlias}, 度量: {r.RouteMetric})");
                 sb.AppendLine();
             }
 
@@ -592,8 +642,8 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
                 sb.AppendLine("修改项：");
                 foreach (var (old, nw) in toModify)
                 {
-                    sb.AppendLine($"  • {old.DestinationDisplay} via {old.NextHop}");
-                    sb.AppendLine($"    → {nw.DestinationDisplay} via {nw.NextHop} (接口: {nw.InterfaceAlias}, 度量: {nw.RouteMetric})");
+                    sb.AppendLine($"  • {old.DestinationDisplay} via {old.NextHopDisplay}");
+                    sb.AppendLine($"    → {nw.DestinationDisplay} via {nw.NextHopDisplay} (接口: {nw.InterfaceAlias}, 度量: {nw.RouteMetric})");
                 }
                 sb.AppendLine();
             }
@@ -620,6 +670,7 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
                     keyMatch.AddressFamily = nw.AddressFamily;
                     keyMatch.DestinationPrefix = nw.DestinationPrefix;
                     keyMatch.NextHop = nw.NextHop;
+                    keyMatch.IsDynamicGateway = nw.IsDynamicGateway;
                     keyMatch.InterfaceAlias = nw.InterfaceAlias;
                     keyMatch.InterfaceIndex = nw.InterfaceIndex;
                     keyMatch.RouteMetric = nw.RouteMetric;
@@ -832,10 +883,19 @@ public partial class PersistentRouteTab : UserControl, IRefreshableTab
 
     private static bool MatchBusinessKey(RouteEntry a, RouteEntry b)
     {
-        return a.AddressFamily == b.AddressFamily
+        bool sameBase = a.AddressFamily == b.AddressFamily
             && a.DestinationPrefix == b.DestinationPrefix
-            && a.NextHop == b.NextHop
-            && a.InterfaceAlias == b.InterfaceAlias;
+            && string.Equals(a.InterfaceAlias, b.InterfaceAlias, StringComparison.OrdinalIgnoreCase);
+
+        if (!sameBase)
+            return false;
+
+        // A dynamic route's next hop changes by design and therefore is not part of
+        // its business identity. Manual routes retain the original next-hop key.
+        if (a.IsDynamicGateway || b.IsDynamicGateway)
+            return true;
+
+        return a.NextHop == b.NextHop;
     }
 
 
